@@ -11,7 +11,6 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Form Data State
   const [formData, setFormData] = useState({
     full_name: '',
     age: 25,
@@ -67,7 +66,6 @@ export default function OnboardingPage() {
   return (
     
       
-        {/* Header */}
         
           
             
@@ -78,7 +76,6 @@ export default function OnboardingPage() {
           
         
 
-        {/* Progress Bar */}
         
           
         
@@ -90,7 +87,6 @@ export default function OnboardingPage() {
             
           )}
 
-          {/* STEP 1: BASIC INFO */}
           {step === 1 && (
             
               Basic Info
@@ -136,7 +132,6 @@ export default function OnboardingPage() {
             
           )}
 
-          {/* STEP 2: GOALS & EXPERIENCE */}
           {step === 2 && (
             
               Goals & Experience
@@ -164,7 +159,6 @@ export default function OnboardingPage() {
             
           )}
 
-          {/* STEP 3: WORKOUT SETUP */}
           {step === 3 && (
             
               Workout Environment
@@ -212,7 +206,6 @@ export default function OnboardingPage() {
             
           )}
 
-          {/* STEP 4: DIET DETAILS */}
           {step === 4 && (
             
               Dietary Profile
@@ -247,7 +240,6 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* Action Buttons */}
           <div className="mt-8 flex justify-between gap-3">
             {step > 1 ? (
               <button
