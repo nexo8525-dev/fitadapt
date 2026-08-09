@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
@@ -71,7 +73,7 @@ export default function OnboardingPage() {
             
           
           
-            FitAdapt Setup
+            {"FitAdapt Setup"}
             Step {step} of 4
           
         
@@ -89,9 +91,9 @@ export default function OnboardingPage() {
 
           {step === 1 && (
             
-              Basic Info
+              {"Basic Info"}
               
-                Full Name
+                {"Full Name"}
                  setFormData({ ...formData, full_name: e.target.value })}
                   placeholder="Rahul Sharma"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
@@ -99,13 +101,13 @@ export default function OnboardingPage() {
               
               
                 
-                  Age
+                  {"Age"}
                    setFormData({ ...formData, age: Number(e.target.value) })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
                   />
                 
                 
-                  Gender
+                  {"Gender"}
                    setFormData({ ...formData, gender: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
                   >
@@ -117,13 +119,13 @@ export default function OnboardingPage() {
               
               
                 
-                  Height (cm)
+                  {"Height (cm)"}
                    setFormData({ ...formData, height_cm: Number(e.target.value) })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
                   />
                 
                 
-                  Weight (kg)
+                  {"Weight (kg)"}
                    setFormData({ ...formData, weight_kg: Number(e.target.value) })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
                   />
@@ -134,9 +136,9 @@ export default function OnboardingPage() {
 
           {step === 2 && (
             
-              Goals & Experience
+              {"Goals & Experience"}
               
-                Primary Fitness Goal
+                {"Primary Fitness Goal"}
                  setFormData({ ...formData, fitness_goal: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
                 >
@@ -147,7 +149,7 @@ export default function OnboardingPage() {
                 
               
               
-                Current Experience
+                {"Current Experience"}
                  setFormData({ ...formData, experience_level: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
                 >
@@ -161,9 +163,9 @@ export default function OnboardingPage() {
 
           {step === 3 && (
             
-              Workout Environment
+              {"Workout Environment"}
               
-                Training Location
+                {"Training Location"}
                  setFormData({ ...formData, workout_location: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
                 >
@@ -173,7 +175,7 @@ export default function OnboardingPage() {
                 
               
               
-                Available Equipment
+                {"Available Equipment"}
                 
                   {['No Equipment', 'Dumbbells', 'Pull-up Bar', 'Resistance Bands', 'Full Gym'].map((item) => (
                      toggleEquipment(item)}
@@ -191,13 +193,13 @@ export default function OnboardingPage() {
               
               
                 
-                  Days / Week
+                  {"Days / Week"}
                    setFormData({ ...formData, training_days: Number(e.target.value) })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
                   />
                 
                 
-                  Push-up Capacity
+                  {"Push-up Capacity"}
                    setFormData({ ...formData, pushup_capacity: Number(e.target.value) })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
                   />
@@ -208,9 +210,9 @@ export default function OnboardingPage() {
 
           {step === 4 && (
             
-              Dietary Profile
+              {"Dietary Profile"}
               
-                Diet Preference
+                {"Diet Preference"}
                  setFormData({ ...formData, dietary_preference: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none"
                 >
@@ -221,14 +223,14 @@ export default function OnboardingPage() {
                 
               
               
-                Foods Easily Available
+                {"Foods Easily Available"}
                  setFormData({ ...formData, available_foods: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:border-emerald-500 outline-none resize-none"
                   placeholder="e.g. Rice, Oats, Paneer, Chicken, Eggs"
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1">Foods You Dislike / Avoid</label>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">{"Foods You Dislike / Avoid"}</label>
                 <input
                   type="text"
                   value={formData.disliked_foods}
@@ -247,7 +249,8 @@ export default function OnboardingPage() {
                 onClick={() => setStep(step - 1)}
                 className="px-4 py-3 bg-slate-800 text-slate-300 font-semibold rounded-xl text-xs flex items-center gap-1"
               >
-                <ArrowLeft className="w-4 h-4" /> Back
+                <ArrowLeft className="w-4 h-4" />
+                <span>{"Back"}</span>
               </button>
             ) : <div />}
 
@@ -257,7 +260,8 @@ export default function OnboardingPage() {
                 onClick={() => setStep(step + 1)}
                 className="px-6 py-3 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1"
               >
-                Next <ArrowRight className="w-4 h-4" />
+                <span>{"Next"}</span>
+                <ArrowRight className="w-4 h-4" />
               </button>
             ) : (
               <button
@@ -266,7 +270,7 @@ export default function OnboardingPage() {
                 onClick={handleSubmit}
                 className="px-6 py-3 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1 disabled:opacity-50"
               >
-                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Complete Setup'}
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>{"Complete Setup"}</span>}
               </button>
             )}
           </div>
@@ -274,4 +278,4 @@ export default function OnboardingPage() {
       </div>
     </div>
   );
-}
+    }
