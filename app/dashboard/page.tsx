@@ -1,9 +1,11 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
-import { Dumbbell, LogOut, Sparkles, Utensils, Calendar } from 'lucide-react';
+import { LogOut, Sparkles, Utensils, Calendar } from 'lucide-react';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -39,57 +41,54 @@ export default function DashboardPage() {
   if (loading) {
     return (
       
-        Loading Dashboard...
+        {"Loading Dashboard..."}
       
     );
   }
 
   return (
     
-      {/* Top Header */}
       
         
           
-            Welcome, {profile?.full_name || 'Athlete'}!
+            {`Welcome, ${profile?.full_name || 'Athlete'}!`}
           
           
-            {profile?.fitness_goal?.replace('_', ' ')} • {profile?.workout_location}
+            {`${profile?.fitness_goal ? profile.fitness_goal.replace('_', ' ') : 'FITNESS'} • ${profile?.workout_location || 'LOCATION'}`}
           
-        
-        
-          
-        
-      
-
-      {/* Quick Status Cards */}
-      
-        
-          
-          Workout Schedule
-          {profile?.training_days} Days / Week
         
         
           
-          Diet Style
-          {profile?.dietary_preference}
         
       
 
-      {/* AI Generator Trigger Banner */}
       
         
           
-          Adaptive AI Engine
+          {"Workout Schedule"}
+          {`${profile?.training_days || 0} Days / Week`}
         
         
-          Ready to generate your custom Week 1 Workout & Diet plan based on your exact profile.
+          
+          {"Diet Style"}
+          {profile?.dietary_preference || 'Balanced'}
+        
+      
+
+      
+        
+          
+          {"Adaptive AI Engine"}
+        
+        
+          {"Ready to generate your custom Week 1 Workout & Diet plan based on your exact profile."}
         
          alert("Next step: Gemini AI integration!")}
           className="w-full py-3 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs flex justify-center items-center gap-2"
         >
-          Generate My Plan
+          {"Generate My Plan"}
         
       
     
   );
-            }
+}
