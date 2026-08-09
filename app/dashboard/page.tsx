@@ -9,13 +9,13 @@ import { LogOut, Sparkles, Utensils, Calendar } from 'lucide-react';
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [profile, setProfile] = useState(null);
+  const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchProfile = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
         router.push('/login');
         return;
       }
@@ -23,7 +23,7 @@ export default function DashboardPage() {
       const { data } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', user.id)
+        .eq('id', session.user.id)
         .single();
 
       setProfile(data);
@@ -40,55 +40,59 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      
-        {"Loading Dashboard..."}
-      
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex justify-center items-center">
+        <p className="text-sm text-slate-400">Loading Dashboard...</p>
+      </div>
     );
   }
 
   return (
-    
-      
-        
-          
-            {`Welcome, ${profile?.full_name || 'Athlete'}!`}
-          
-          
-            {`${profile?.fitness_goal ? profile.fitness_goal.replace('_', ' ') : 'FITNESS'} • ${profile?.workout_location || 'LOCATION'}`}
-          
-        
-        
-          
-        
-      
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 max-w-md mx-auto pb-20">
+      <div className="flex justify-between items-center py-4 mb-4 border-b border-slate-800">
+        <div>
+          <h1 className="text-xl font-bold text-slate-100">
+            Welcome, {profile?.full_name || 'Athlete'}!
+          </h1>
+          <p className="text-xs text-slate-400 uppercase tracking-wider">
+            {profile?.fitness_goal?.replace('_', ' ')} • {profile?.workout_location}
+          </p>
+        </div>
+        <button
+          onClick={handleLogout}
+          className="p-2 bg-slate-900 border border-slate-800 text-slate-400 rounded-xl"
+        >
+          <LogOut className="w-5 h-5" />
+        </button>
+      </div>
 
-      
-        
-          
-          {"Workout Schedule"}
-          {`${profile?.training_days || 0} Days / Week`}
-        
-        
-          
-          {"Diet Style"}
-          {profile?.dietary_preference || 'Balanced'}
-        
-      
+      <div className="grid grid-cols-2 gap-3 mb-6">
+        <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+          <Calendar className="w-5 h-5 text-emerald-400 mb-2" />
+          <p className="text-xs text-slate-400">Workout Schedule</p>
+          <p className="text-sm font-bold text-slate-200">{profile?.training_days} Days / Week</p>
+        </div>
+        <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+          <Utensils className="w-5 h-5 text-emerald-400 mb-2" />
+          <p className="text-xs text-slate-400">Diet Style</p>
+          <p className="text-sm font-bold text-slate-200 capitalize">{profile?.dietary_preference}</p>
+        </div>
+      </div>
 
-      
-        
-          
-          {"Adaptive AI Engine"}
-        
-        
-          {"Ready to generate your custom Week 1 Workout & Diet plan based on your exact profile."}
-        
-         alert("Next step: Gemini AI integration!")}
+      <div className="bg-gradient-to-br from-emerald-950 to-slate-900 border border-emerald-500/30 p-5 rounded-2xl mb-6">
+        <div className="flex items-center gap-2 mb-2">
+          <Sparkles className="w-5 h-5 text-emerald-400" />
+          <h2 className="text-base font-bold text-emerald-400">Adaptive AI Engine</h2>
+        </div>
+        <p className="text-xs text-slate-300 mb-4">
+          Ready to generate your custom Week 1 Workout & Diet plan based on your exact profile.
+        </p>
+        <button
+          onClick={() => alert("Next step: Gemini AI integration!")}
           className="w-full py-3 bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs flex justify-center items-center gap-2"
         >
-          {"Generate My Plan"}
-        
-      
-    
+          Generate My Plan
+        </button>
+      </div>
+    </div>
   );
 }
