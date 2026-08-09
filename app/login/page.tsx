@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
@@ -64,7 +66,7 @@ export default function AuthPage() {
           
         
         
-          FitAdapt AI
+          {"FitAdapt AI"}
         
         
           {isLogin ? 'Sign in to your adaptive coach.' : 'Start your personalized fitness journey.'}
@@ -82,7 +84,7 @@ export default function AuthPage() {
 
             
               
-                Email
+                {"Email"}
               
               
                 
@@ -95,7 +97,7 @@ export default function AuthPage() {
 
             
               
-                Password
+                {"Password"}
               
               
                 
