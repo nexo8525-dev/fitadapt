@@ -27,6 +27,7 @@ export default function OnboardingPage() {
     diet_budget_per_month: '',
   });
 
+  // ✅ YEH NAYA handleSubmit HAI - API call karega
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -54,7 +55,7 @@ export default function OnboardingPage() {
     }
   };
 
-  // Yahan tumhara existing UI/form JSX rahega
+  // Tumhara existing JSX/UI yahan rahega
   return (
     <form onSubmit={handleSubmit}>
       {/* Tumhare saare input fields yahan */}
