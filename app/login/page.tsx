@@ -37,9 +37,20 @@ export default function AuthPage() {
           else router.push('/onboarding');
         }
       } else {
-        const { error } = await supabase.auth.signUp({ email, password });
+        // 1. Create the account
+        const { data, error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        router.push('/onboarding');
+
+        // 2. PERMANENT FIX: Force immediate login right after signup to guarantee session
+        if (!data.session) {
+          const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+          if (signInError) throw signInError;
+        }
+
+        // 3. Small delay to let localStorage save the token properly before redirecting
+        setTimeout(() => {
+          router.push('/onboarding');
+        }, 500);
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Authentication failed.');
@@ -57,7 +68,7 @@ export default function AuthPage() {
           </div>
         </div>
         <h2 className="text-3xl font-extrabold tracking-tight text-slate-100">
-          FitAdapt AI
+          {"FitAdapt AI"}
         </h2>
         <p className="mt-2 text-sm text-slate-400">
           {isLogin ? 'Sign in to your adaptive coach.' : 'Start your personalized fitness journey.'}
@@ -75,7 +86,7 @@ export default function AuthPage() {
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase mb-2">
-                Email
+                {"Email"}
               </label>
               <div className="relative">
                 <Mail className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -92,7 +103,7 @@ export default function AuthPage() {
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase mb-2">
-                Password
+                {"Password"}
               </label>
               <div className="relative">
                 <Lock className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
