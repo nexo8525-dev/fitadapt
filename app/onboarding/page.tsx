@@ -1,26 +1,66 @@
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  if (!user) return;
+'use client';
 
-  setLoading(true);
-  try {
-    const response = await fetch('/api/onboarding', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formData), // Direct formData bhejo, parsing server pe ho jayegi
-    });
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useUser } from '@clerk/nextjs';
 
-    const result = await response.json();
+export default function OnboardingPage() {
+  const router = useRouter();
+  const { user } = useUser();
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    full_name: '',
+    age: '',
+    gender: '',
+    height_cm: '',
+    weight_kg: '',
+    fitness_goal: '',
+    experience_level: '',
+    workout_location: '',
+    equipment: '',
+    training_days: '',
+    time_per_session_min: '',
+    pushup_capacity: '',
+    dietary_preference: '',
+    available_foods: '',
+    disliked_foods: '',
+    diet_budget_per_month: '',
+  });
 
-    if (response.ok) {
-      router.push('/dashboard');
-    } else {
-      alert(result.error || 'Something went wrong. Please try again.');
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
+    setLoading(true);
+    try {
+      const response = await fetch('/api/onboarding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        router.push('/dashboard');
+      } else {
+        alert(result.error || 'Something went wrong. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Network error. Please try again.');
+    } finally {
+      setLoading(false);
     }
-  } catch (error) {
-    console.error('Error:', error);
-    alert('Network error. Please try again.');
-  } finally {
-    setLoading(false);
-  }
-};
+  };
+
+  // Yahan tumhara existing UI/form JSX rahega
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* Tumhare saare input fields yahan */}
+      <button type="submit" disabled={loading}>
+        {loading ? 'Saving...' : 'Complete Setup'}
+      </button>
+    </form>
+  );
+}
