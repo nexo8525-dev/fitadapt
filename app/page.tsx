@@ -1,47 +1,40 @@
 'use client';
 
-export const dynamic = 'force-dynamic';
-
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-import { Loader2 } from 'lucide-react';
+import { useUser } from '@clerk/nextjs';
+import { supabase } from '@/lib/supabaseClient'; // tumhari supabase client import
 
 export default function HomePage() {
   const router = useRouter();
+  const { isLoaded, isSignedIn, user } = useUser();
 
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (!session) {
-          router.push('/login');
-        } else {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('id', session.user.id)
-            .single();
+    if (!isLoaded) return;
 
-          if (profile) {
-            router.push('/dashboard');
-          } else {
-            router.push('/onboarding');
-          }
-        }
-      } catch (e) {
-        router.push('/login');
+    if (!isSignedIn) {
+      router.push('/login');
+      return;
+    }
+
+    // Clerk user ID se profile check karo
+    const checkProfile = async () => {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('clerk_user_id', user.id)
+        .maybeSingle();
+
+      if (profile) {
+        router.push('/dashboard');
+      } else {
+        router.push('/onboarding');
       }
     };
 
-    checkAuth();
-  }, [router]);
+    checkProfile();
+  }, [isLoaded, isSignedIn, user, router]);
 
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center">
-      <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-2" />
-      <p className="text-sm text-slate-400">Loading FitAdapt AI...</p>
-    </div>
-  );
+  // Loading state
+  return <div>Loading...</div>;
 }
