@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUser, useClerk } from '@clerk/nextjs';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '@/lib/supabase';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -24,7 +24,6 @@ export default function DashboardPage() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // 1. Profile fetch
         const { data: profileData } = await supabase
           .from('profiles')
           .select('*')
@@ -37,16 +36,14 @@ export default function DashboardPage() {
         }
         setProfile(profileData);
 
-        // 2. Workout plan
         const { data: workout } = await supabase
           .from('workout_plans')
           .select('plan_data')
-          .eq('user_id', profileData.id) // profileData.id Clerk ID hai
+          .eq('user_id', profileData.id)
           .eq('is_active', true)
           .maybeSingle();
         setWorkoutPlan(workout);
 
-        // 3. Diet plan
         const { data: diet } = await supabase
           .from('diet_plans')
           .select('plan_data')
