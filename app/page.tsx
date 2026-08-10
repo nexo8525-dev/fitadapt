@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUser } from '@clerk/nextjs';
-import { supabase } from '@/lib/supabaseClient'; // tumhari supabase client import
+import { supabase } from '@/lib/supabase';
 
 export default function HomePage() {
   const router = useRouter();
@@ -17,7 +17,6 @@ export default function HomePage() {
       return;
     }
 
-    // Clerk user ID se profile check karo
     const checkProfile = async () => {
       const { data: profile, error } = await supabase
         .from('profiles')
@@ -35,6 +34,5 @@ export default function HomePage() {
     checkProfile();
   }, [isLoaded, isSignedIn, user, router]);
 
-  // Loading state
   return <div>Loading...</div>;
 }
