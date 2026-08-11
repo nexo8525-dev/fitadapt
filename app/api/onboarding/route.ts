@@ -9,19 +9,17 @@ export async function POST(req: NextRequest) {
   try {
     // Clerk se user verify
     const { userId } = await auth();
-    console.log('userId from Clerk:', userId);
-    
+    console.log('Clerk userId from route:', userId);
+
     if (!userId) {
       return NextResponse.json(
-        { error: 'Unauthorized' },
+        { error: 'Unauthorized - Please sign in again' },
         { status: 401 }
       );
     }
 
-    // Form data parse
     const body = await req.json();
 
-    // Profile data prepare
     const profileData = {
       id: userId,
       clerk_user_id: userId,
@@ -43,7 +41,6 @@ export async function POST(req: NextRequest) {
       diet_budget_per_month: parseFloat(body.diet_budget_per_month),
     };
 
-    // Supabase Admin (Service Role)
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
     const { error } = await supabaseAdmin
       .from('profiles')
