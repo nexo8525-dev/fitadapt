@@ -14,7 +14,7 @@ const supabaseAdmin = createClient(
 
 const genAI = new GoogleGenerativeAI(geminiApiKey);
 
-function cleanJsonResponse(text: string) {
+function cleanJsonResponse(text: string): string {
   return text
     .replace(/```json/gi, '')
     .replace(/```/g, '')
@@ -23,7 +23,6 @@ function cleanJsonResponse(text: string) {
 
 export async function POST() {
   try {
-    // 1. Get authenticated Clerk user
     const { userId } = await auth();
 
     if (!userId) {
@@ -33,7 +32,6 @@ export async function POST() {
       );
     }
 
-    // 2. Get profile using Clerk user ID
     const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select(`
@@ -62,36 +60,37 @@ export async function POST() {
       console.error('Profile fetch error:', profileError);
 
       return NextResponse.json(
-        { error: 'Profile not found. Please complete onboarding first.' },
+        {
+          error:
+            'Profile not found. Please complete onboarding first.',
+        },
         { status: 404 }
       );
     }
 
-    // 3. Build Gemini prompt
     const prompt = `
 You are an expert fitness and nutrition planner.
 
-Create a personalized 7-day workout plan and 7-day diet plan based ONLY on the user's profile below.
+Create a personalized 7-day workout plan and 7-day diet plan based only on this user's profile:
 
-USER PROFILE:
 ${JSON.stringify(profile, null, 2)}
 
-IMPORTANT RULES:
+RULES:
 
 1. Return ONLY valid JSON.
-2. Do NOT use markdown.
-3. Do NOT wrap the JSON in ```json.
-4. Do NOT include explanations outside the JSON.
+2. Do not use markdown.
+3. Do not wrap the JSON in code fences.
+4. Do not include explanations outside the JSON.
 5. Workout must contain exactly 7 days: Monday through Sunday.
 6. Diet must contain exactly 7 days: Monday through Sunday.
-7. Respect the user's fitness goal, experience level, available equipment, workout location, training days and session duration.
+7. Respect the user's fitness goal, experience level, equipment, location, training days and session duration.
 8. Respect dietary preference, available foods, disliked foods and monthly budget.
-9. Do not recommend foods listed in disliked_foods.
+9. Never recommend foods listed in disliked_foods.
 10. Keep the plan practical and realistic.
 11. Include rest/recovery days where appropriate.
-12. Do not invent medical conditions or claim to diagnose anything.
+12. Do not diagnose medical conditions.
 
-Return JSON in EXACTLY this structure:
+Return this exact JSON structure:
 
 {
   "workout": {
@@ -156,7 +155,6 @@ Return JSON in EXACTLY this structure:
 }
 `;
 
-    // 4. Call Gemini
     const model = genAI.getGenerativeModel({
       model: 'gemini-1.5-flash',
       generationConfig: {
@@ -175,10 +173,9 @@ Return JSON in EXACTLY this structure:
       );
     }
 
-    // 5. Clean and parse JSON
     const cleanedResponse = cleanJsonResponse(responseText);
 
-    let plan;
+    let plan: any;
 
     try {
       plan = JSON.parse(cleanedResponse);
@@ -187,37 +184,46 @@ Return JSON in EXACTLY this structure:
       console.error('Gemini response:', responseText);
 
       return NextResponse.json(
-        { error: 'Gemini returned invalid JSON. Please try again.' },
+        {
+          error:
+            'Gemini returned invalid JSON. Please try again.',
+        },
         { status: 502 }
       );
     }
 
     if (!plan.workout || !plan.diet) {
       return NextResponse.json(
-        { error: 'Gemini returned an incomplete plan. Please try again.' },
+        {
+          error:
+            'Gemini returned an incomplete plan. Please try again.',
+        },
         { status: 502 }
       );
     }
 
-    // 6. Save workout plan
-    const { data: workoutPlan, error: workoutError } = await supabaseAdmin
-      .from('workout_plans')
-      .upsert(
-        {
-          user_id: profile.id,
-          plan_data: plan.workout,
-          week_number: 1,
-          is_active: true,
-        },
-        {
-          onConflict: 'user_id,week_number',
-        }
-      )
-      .select()
-      .single();
+    const { data: workoutPlan, error: workoutError } =
+      await supabaseAdmin
+        .from('workout_plans')
+        .upsert(
+          {
+            user_id: profile.id,
+            plan_data: plan.workout,
+            week_number: 1,
+            is_active: true,
+          },
+          {
+            onConflict: 'user_id,week_number',
+          }
+        )
+        .select()
+        .single();
 
     if (workoutError) {
-      console.error('Workout plan save error:', workoutError);
+      console.error(
+        'Workout plan save error:',
+        workoutError
+      );
 
       return NextResponse.json(
         { error: 'Failed to save workout plan.' },
@@ -225,25 +231,28 @@ Return JSON in EXACTLY this structure:
       );
     }
 
-    // 7. Save diet plan
-    const { data: dietPlan, error: dietError } = await supabaseAdmin
-      .from('diet_plans')
-      .upsert(
-        {
-          user_id: profile.id,
-          plan_data: plan.diet,
-          week_number: 1,
-          is_active: true,
-        },
-        {
-          onConflict: 'user_id',
-        }
-      )
-      .select()
-      .single();
+    const { data: dietPlan, error: dietError } =
+      await supabaseAdmin
+        .from('diet_plans')
+        .upsert(
+          {
+            user_id: profile.id,
+            plan_data: plan.diet,
+            week_number: 1,
+            is_active: true,
+          },
+          {
+            onConflict: 'user_id',
+          }
+        )
+        .select()
+        .single();
 
     if (dietError) {
-      console.error('Diet plan save error:', dietError);
+      console.error(
+        'Diet plan save error:',
+        dietError
+      );
 
       return NextResponse.json(
         { error: 'Failed to save diet plan.' },
@@ -251,7 +260,6 @@ Return JSON in EXACTLY this structure:
       );
     }
 
-    // 8. Return generated plan
     return NextResponse.json({
       success: true,
       workout: workoutPlan,
@@ -261,8 +269,11 @@ Return JSON in EXACTLY this structure:
     console.error('Generate plan API error:', error);
 
     return NextResponse.json(
-      { error: 'Internal server error while generating plan.' },
+      {
+        error:
+          'Internal server error while generating plan.',
+      },
       { status: 500 }
     );
   }
-      }
+}
