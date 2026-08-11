@@ -8,19 +8,14 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 export async function POST(req: NextRequest) {
   try {
     const { userId } = await auth();
-    console.log('Clerk userId from route:', userId);
-
     if (!userId) {
-      return NextResponse.json(
-        { error: 'Unauthorized - Please sign in again' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const body = await req.json();
 
+    // Remove 'id' from here — Supabase will auto-generate UUID
     const profileData = {
-      id: userId,
       clerk_user_id: userId,
       full_name: body.full_name,
       age: parseInt(body.age),
@@ -43,22 +38,16 @@ export async function POST(req: NextRequest) {
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
     const { error } = await supabaseAdmin
       .from('profiles')
-      .upsert(profileData, { onConflict: 'id' });
+      .upsert(profileData, { onConflict: 'clerk_user_id' }); // Upsert on clerk_user_id
 
     if (error) {
       console.error('Supabase error:', error);
-      return NextResponse.json(
-        { error: `Database error: ${error.message}` },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('API error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
