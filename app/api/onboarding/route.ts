@@ -7,7 +7,6 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 export async function POST(req: NextRequest) {
   try {
-    // Clerk se user verify
     const { userId } = await auth();
     console.log('Clerk userId from route:', userId);
 
