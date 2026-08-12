@@ -41,6 +41,7 @@ type PlanRow = {
   plan_data: any;
   week_number: number;
   is_active?: boolean;
+  created_at?: string;
 };
 
 type ActivityRow = {
@@ -174,7 +175,7 @@ function WorkoutDayCard({
       </div>
 
       {exercises.length === 0 ? (
-        <div className="rounded-xl bg-slate-900 p-4 text-slate-400 text-sm mb-3">
+        <div className="rounded-xl bg-slate-900 p-4 text-slate-400 text-sm mb-4">
           Recovery / Rest day
         </div>
       ) : (
@@ -219,6 +220,7 @@ function WorkoutDayCard({
       )}
 
       <button
+        type="button"
         onClick={onToggleComplete}
         disabled={loading}
         className={`w-full rounded-xl px-4 py-3 font-semibold transition ${
@@ -270,9 +272,7 @@ function WorkoutSection({
             data={data?.[day] || {}}
             completed={Boolean(activity[day])}
             loading={Boolean(activityLoading[day])}
-            onToggleComplete={() =>
-              onToggleComplete(day)
-            }
+            onToggleComplete={() => onToggleComplete(day)}
           />
         ))}
       </div>
@@ -332,26 +332,26 @@ function DietDayCard({
         />
       </div>
 
-      {Array.isArray(data.snacks) &&
-        data.snacks.length > 0 && (
-          <div className="mt-3">
-            <h4 className="text-white font-bold mb-2">
-              🍎 Snacks
-            </h4>
+      {Array.isArray(data.snacks) && data.snacks.length > 0 && (
+        <div className="mt-3">
+          <h4 className="text-white font-bold mb-2">
+            🍎 Snacks
+          </h4>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {data.snacks.map((snack, index) => (
-                <MealCard
-                  key={index}
-                  title={`Snack ${index + 1}`}
-                  meal={snack}
-                />
-              ))}
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {data.snacks.map((snack, index) => (
+              <MealCard
+                key={index}
+                title={`Snack ${index + 1}`}
+                meal={snack}
+              />
+            ))}
           </div>
-        )}
+        </div>
+      )}
 
       <button
+        type="button"
         onClick={onToggleComplete}
         disabled={loading}
         className={`w-full mt-4 rounded-xl px-4 py-3 font-semibold transition ${
@@ -406,9 +406,7 @@ function DietSection({
               data={dayData}
               completed={Boolean(activity[day])}
               loading={Boolean(activityLoading[day])}
-              onToggleComplete={() =>
-                onToggleComplete(day)
-              }
+              onToggleComplete={() => onToggleComplete(day)}
             />
           );
         })}
@@ -420,12 +418,7 @@ function DietSection({
 export default function DashboardPage() {
   const router = useRouter();
 
-  const {
-    isLoaded,
-    isSignedIn,
-    user,
-  } = useUser();
-
+  const { isLoaded, isSignedIn, user } = useUser();
   const { signOut } = useClerk();
 
   const [profile, setProfile] = useState<any>(null);
@@ -445,7 +438,6 @@ export default function DashboardPage() {
     useState<Record<string, boolean>>({});
 
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -531,14 +523,8 @@ export default function DashboardPage() {
             .from('workout_activity')
             .select('*')
             .eq('user_id', profileData.id)
-            .eq(
-              'workout_plan_id',
-              workoutData.id
-            )
-            .eq(
-              'week_number',
-              workoutData.week_number
-            );
+            .eq('workout_plan_id', workoutData.id)
+            .eq('week_number', workoutData.week_number);
 
           if (workoutActivityError) {
             console.error(
@@ -546,10 +532,7 @@ export default function DashboardPage() {
               workoutActivityError
             );
           } else {
-            const activityMap: Record<
-              string,
-              boolean
-            > = {};
+            const activityMap: Record<string, boolean> = {};
 
             (workoutActivityData || []).forEach(
               (row: ActivityRow) => {
@@ -572,14 +555,8 @@ export default function DashboardPage() {
             .from('diet_activity')
             .select('*')
             .eq('user_id', profileData.id)
-            .eq(
-              'diet_plan_id',
-              dietData.id
-            )
-            .eq(
-              'week_number',
-              dietData.week_number
-            );
+            .eq('diet_plan_id', dietData.id)
+            .eq('week_number', dietData.week_number);
 
           if (dietActivityError) {
             console.error(
@@ -587,10 +564,7 @@ export default function DashboardPage() {
               dietActivityError
             );
           } else {
-            const activityMap: Record<
-              string,
-              boolean
-            > = {};
+            const activityMap: Record<string, boolean> = {};
 
             (dietActivityData || []).forEach(
               (row: ActivityRow) => {
@@ -617,9 +591,7 @@ export default function DashboardPage() {
     loadDashboard();
   }, [isLoaded, isSignedIn, user, router]);
 
-  async function toggleWorkoutComplete(
-    day: string
-  ) {
+  async function toggleWorkoutComplete(day: string) {
     if (!profile || !workout) return;
 
     if (workoutActivityLoading[day]) return;
@@ -638,14 +610,8 @@ export default function DashboardPage() {
           .from('workout_activity')
           .select('id')
           .eq('user_id', profile.id)
-          .eq(
-            'workout_plan_id',
-            workout.id
-          )
-          .eq(
-            'week_number',
-            workout.week_number
-          )
+          .eq('workout_plan_id', workout.id)
+          .eq('week_number', workout.week_number)
           .eq('day', day)
           .maybeSingle();
 
@@ -681,9 +647,10 @@ export default function DashboardPage() {
             workout_plan_id: workout.id,
             week_number: workout.week_number,
             day,
-            completed: true,
-            completed_at:
-              new Date().toISOString(),
+            completed: newCompleted,
+            completed_at: newCompleted
+              ? new Date().toISOString()
+              : null,
           });
 
         if (error) {
@@ -716,9 +683,7 @@ export default function DashboardPage() {
     }
   }
 
-  async function toggleDietComplete(
-    day: string
-  ) {
+  async function toggleDietComplete(day: string) {
     if (!profile || !diet) return;
 
     if (dietActivityLoading[day]) return;
@@ -737,14 +702,8 @@ export default function DashboardPage() {
           .from('diet_activity')
           .select('id')
           .eq('user_id', profile.id)
-          .eq(
-            'diet_plan_id',
-            diet.id
-          )
-          .eq(
-            'week_number',
-            diet.week_number
-          )
+          .eq('diet_plan_id', diet.id)
+          .eq('week_number', diet.week_number)
           .eq('day', day)
           .maybeSingle();
 
@@ -780,9 +739,10 @@ export default function DashboardPage() {
             diet_plan_id: diet.id,
             week_number: diet.week_number,
             day,
-            completed: true,
-            completed_at:
-              new Date().toISOString(),
+            completed: newCompleted,
+            completed_at: newCompleted
+              ? new Date().toISOString()
+              : null,
           });
 
         if (error) {
@@ -815,13 +775,29 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleGeneratePlan() {
-    if (generating) return;
+  async function handleLogout() {
+    await signOut();
+    router.push('/login');
+  }
 
-    setGenerating(true);
+  if (!isLoaded || loading) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
+        <div className="text-center">
+          <div className="text-4xl mb-3">
+            ⚡
+          </div>
 
-    try {
-      const response = await fetch(
-        '/api/generate-plan',
-        {
-        
+          <p className="text-slate-300">
+            Loading your dashboard...
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  const hasPlan = Boolean(workout || diet);
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-white">
+      <div className=
