@@ -3,9 +3,13 @@ import { auth } from '@clerk/nextjs/server';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const geminiApiKey = process.env.GEMINI_API_KEY!;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const geminiApiKey = process.env.GEMINI_API_KEY;
+
+if (!supabaseUrl || !supabaseServiceKey || !geminiApiKey) {
+  throw new Error('Required environment variables are missing.');
+}
 
 const supabaseAdmin = createClient(
   supabaseUrl,
@@ -14,15 +18,80 @@ const supabaseAdmin = createClient(
 
 const genAI = new GoogleGenerativeAI(geminiApiKey);
 
-function cleanJsonResponse(text: string): string {
+function cleanJson(text: string) {
   return text
     .replace(/```json/gi, '')
     .replace(/```/g, '')
     .trim();
 }
 
+async function savePlan(
+  table: 'workout_plans' | 'diet_plans',
+  userId: string,
+  planData: any
+) {
+  // Check if week 1 already exists
+  const { data: existing, error: findError } = await supabaseAdmin
+    .from(table)
+    .select('id')
+    .eq('user_id', userId)
+    .eq('week_number', 1)
+    .maybeSingle();
+
+  if (findError) {
+    throw new Error(
+      `${table} lookup failed: ${findError.message}`
+    );
+  }
+
+  // Update existing plan
+  if (existing) {
+    const { data, error } = await supabaseAdmin
+      .from(table)
+      .update({
+        plan_data: planData,
+        is_active: true,
+      })
+      .eq('id', existing.id)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(
+        `${table} update failed: ${error.message}`
+      );
+    }
+
+    return data;
+  }
+
+  // Insert new plan
+  const { data, error } = await supabaseAdmin
+    .from(table)
+    .insert({
+      user_id: userId,
+      plan_data: planData,
+      week_number: 1,
+      is_active: true,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(
+      `${table} insert failed: ${error.message}`
+    );
+  }
+
+  return data;
+}
+
 export async function POST() {
   try {
+    // --------------------------------
+    // 1. Get Clerk user
+    // --------------------------------
+
     const { userId } = await auth();
 
     if (!userId) {
@@ -32,32 +101,19 @@ export async function POST() {
       );
     }
 
-    const { data: profile, error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .select(`
-        id,
-        full_name,
-        age,
-        gender,
-        height_cm,
-        weight_kg,
-        fitness_goal,
-        experience_level,
-        workout_location,
-        equipment,
-        training_days,
-        time_per_session_min,
-        pushup_capacity,
-        dietary_preference,
-        available_foods,
-        disliked_foods,
-        diet_budget_per_month
-      `)
-      .eq('clerk_user_id', userId)
-      .single();
+    // --------------------------------
+    // 2. Get profile
+    // --------------------------------
+
+    const { data: profile, error: profileError } =
+      await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .eq('clerk_user_id', userId)
+        .single();
 
     if (profileError || !profile) {
-      console.error('Profile fetch error:', profileError);
+      console.error('Profile error:', profileError);
 
       return NextResponse.json(
         {
@@ -68,29 +124,40 @@ export async function POST() {
       );
     }
 
+    // --------------------------------
+    // 3. Gemini prompt
+    // --------------------------------
+
     const prompt = `
 You are an expert fitness and nutrition planner.
 
-Create a personalized 7-day workout plan and 7-day diet plan based only on this user's profile:
+Create a personalized 7-day workout plan and 7-day diet plan using the user's profile below.
 
+USER PROFILE:
 ${JSON.stringify(profile, null, 2)}
 
-RULES:
+IMPORTANT RULES:
 
-1. Return ONLY valid JSON.
-2. Do not use markdown.
-3. Do not wrap the JSON in code fences.
-4. Do not include explanations outside the JSON.
-5. Workout must contain exactly 7 days: Monday through Sunday.
-6. Diet must contain exactly 7 days: Monday through Sunday.
-7. Respect the user's fitness goal, experience level, equipment, location, training days and session duration.
-8. Respect dietary preference, available foods, disliked foods and monthly budget.
-9. Never recommend foods listed in disliked_foods.
-10. Keep the plan practical and realistic.
-11. Include rest/recovery days where appropriate.
-12. Do not diagnose medical conditions.
+- Return ONLY valid JSON.
+- Do NOT use markdown.
+- Do NOT use code fences.
+- Do NOT add explanations outside the JSON.
+- Workout must contain Monday through Sunday.
+- Diet must contain Monday through Sunday.
+- Respect the user's fitness goal.
+- Respect experience level.
+- Respect available equipment.
+- Respect workout location.
+- Respect training days per week.
+- Respect session duration.
+- Respect dietary preference.
+- Use foods available to the user when possible.
+- Never recommend foods that the user wants to avoid.
+- Respect the user's budget.
+- Include appropriate rest/recovery days.
+- Keep the plan realistic and practical.
 
-Return this exact JSON structure:
+Return EXACTLY this structure:
 
 {
   "workout": {
@@ -107,13 +174,38 @@ Return this exact JSON structure:
         }
       ]
     },
-    "Tuesday": {},
-    "Wednesday": {},
-    "Thursday": {},
-    "Friday": {},
-    "Saturday": {},
-    "Sunday": {}
+    "Tuesday": {
+      "focus": "string",
+      "duration_minutes": 30,
+      "exercises": []
+    },
+    "Wednesday": {
+      "focus": "string",
+      "duration_minutes": 30,
+      "exercises": []
+    },
+    "Thursday": {
+      "focus": "string",
+      "duration_minutes": 30,
+      "exercises": []
+    },
+    "Friday": {
+      "focus": "string",
+      "duration_minutes": 30,
+      "exercises": []
+    },
+    "Saturday": {
+      "focus": "string",
+      "duration_minutes": 30,
+      "exercises": []
+    },
+    "Sunday": {
+      "focus": "Rest / Recovery",
+      "duration_minutes": 0,
+      "exercises": []
+    }
   },
+
   "diet": {
     "Monday": {
       "breakfast": {
@@ -145,6 +237,7 @@ Return this exact JSON structure:
       "daily_total_calories": 0,
       "daily_total_protein_g": 0
     },
+
     "Tuesday": {},
     "Wednesday": {},
     "Thursday": {},
@@ -155,32 +248,42 @@ Return this exact JSON structure:
 }
 `;
 
+    // --------------------------------
+    // 4. Call Gemini
+    // --------------------------------
+
     const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+      model: 'gemini-3.5-flash-lite',
       generationConfig: {
-        temperature: 0.4,
         responseMimeType: 'application/json',
       },
     });
 
     const result = await model.generateContent(prompt);
+
     const responseText = result.response.text();
 
     if (!responseText) {
       return NextResponse.json(
-        { error: 'Gemini returned an empty response.' },
+        {
+          error: 'Gemini returned an empty response.',
+        },
         { status: 502 }
       );
     }
 
-    const cleanedResponse = cleanJsonResponse(responseText);
+    // --------------------------------
+    // 5. Parse Gemini JSON
+    // --------------------------------
+
+    const cleaned = cleanJson(responseText);
 
     let plan: any;
 
     try {
-      plan = JSON.parse(cleanedResponse);
-    } catch (parseError) {
-      console.error('Gemini JSON parse error:', parseError);
+      plan = JSON.parse(cleaned);
+    } catch (error) {
+      console.error('JSON parsing failed:', error);
       console.error('Gemini response:', responseText);
 
       return NextResponse.json(
@@ -196,84 +299,55 @@ Return this exact JSON structure:
       return NextResponse.json(
         {
           error:
-            'Gemini returned an incomplete plan. Please try again.',
+            'Gemini returned an incomplete workout/diet plan.',
         },
         { status: 502 }
       );
     }
 
-    const { data: workoutPlan, error: workoutError } =
-      await supabaseAdmin
-        .from('workout_plans')
-        .upsert(
-          {
-            user_id: profile.id,
-            plan_data: plan.workout,
-            week_number: 1,
-            is_active: true,
-          },
-          {
-            onConflict: 'user_id,week_number',
-          }
-        )
-        .select()
-        .single();
+    // --------------------------------
+    // 6. Save workout plan
+    // --------------------------------
 
-    if (workoutError) {
-      console.error(
-        'Workout plan save error:',
-        workoutError
-      );
+    const workoutPlan = await savePlan(
+      'workout_plans',
+      profile.id,
+      plan.workout
+    );
 
-      return NextResponse.json(
-        { error: 'Failed to save workout plan.' },
-        { status: 500 }
-      );
-    }
+    // --------------------------------
+    // 7. Save diet plan
+    // --------------------------------
 
-    const { data: dietPlan, error: dietError } =
-      await supabaseAdmin
-        .from('diet_plans')
-        .upsert(
-          {
-            user_id: profile.id,
-            plan_data: plan.diet,
-            week_number: 1,
-            is_active: true,
-          },
-          {
-            onConflict: 'user_id',
-          }
-        )
-        .select()
-        .single();
+    const dietPlan = await savePlan(
+      'diet_plans',
+      profile.id,
+      plan.diet
+    );
 
-    if (dietError) {
-      console.error(
-        'Diet plan save error:',
-        dietError
-      );
-
-      return NextResponse.json(
-        { error: 'Failed to save diet plan.' },
-        { status: 500 }
-      );
-    }
+    // --------------------------------
+    // 8. Return result
+    // --------------------------------
 
     return NextResponse.json({
       success: true,
       workout: workoutPlan,
       diet: dietPlan,
     });
-  } catch (error) {
-    console.error('Generate plan API error:', error);
+
+  } catch (error: any) {
+    console.error(
+      'Generate plan API error:',
+      error
+    );
 
     return NextResponse.json(
       {
         error:
+          error?.message ||
           'Internal server error while generating plan.',
       },
       { status: 500 }
     );
   }
-}
+      }
