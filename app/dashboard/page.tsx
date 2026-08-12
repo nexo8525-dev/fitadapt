@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabase';
 type Exercise = {
   name?: string;
   sets?: number | string;
-  reps?: string | number;
+  reps?: number | string;
   rest_seconds?: number | string;
   notes?: string;
 };
@@ -41,18 +41,6 @@ type PlanRow = {
   plan_data: any;
   week_number: number;
   is_active?: boolean;
-  created_at?: string;
-};
-
-type ActivityRow = {
-  id: string;
-  user_id: string;
-  workout_plan_id?: string | null;
-  diet_plan_id?: string | null;
-  week_number?: number | null;
-  day?: string | null;
-  completed?: boolean | null;
-  completed_at?: string | null;
 };
 
 const DAYS = [
@@ -225,9 +213,9 @@ function WorkoutDayCard({
         disabled={loading}
         className={`w-full rounded-xl px-4 py-3 font-semibold transition ${
           completed
-            ? 'bg-green-600 hover:bg-green-700 text-white'
-            : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-        } disabled:bg-slate-700 disabled:cursor-not-allowed`}
+            ? 'bg-green-600 hover:bg-green-700'
+            : 'bg-indigo-600 hover:bg-indigo-700'
+        } text-white disabled:bg-slate-700 disabled:cursor-not-allowed`}
       >
         {loading
           ? 'Saving...'
@@ -356,9 +344,9 @@ function DietDayCard({
         disabled={loading}
         className={`w-full mt-4 rounded-xl px-4 py-3 font-semibold transition ${
           completed
-            ? 'bg-green-600 hover:bg-green-700 text-white'
-            : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-        } disabled:bg-slate-700 disabled:cursor-not-allowed`}
+            ? 'bg-green-600 hover:bg-green-700'
+            : 'bg-indigo-600 hover:bg-indigo-700'
+        } text-white disabled:bg-slate-700 disabled:cursor-not-allowed`}
       >
         {loading
           ? 'Saving...'
@@ -418,7 +406,12 @@ function DietSection({
 export default function DashboardPage() {
   const router = useRouter();
 
-  const { isLoaded, isSignedIn, user } = useUser();
+  const {
+    isLoaded,
+    isSignedIn,
+    user,
+  } = useUser();
+
   const { signOut } = useClerk();
 
   const [profile, setProfile] = useState<any>(null);
@@ -438,6 +431,7 @@ export default function DashboardPage() {
     useState<Record<string, boolean>>({});
 
   const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -451,12 +445,14 @@ export default function DashboardPage() {
       setLoading(true);
 
       try {
-        const { data: profileData, error: profileError } =
-          await supabase
-            .from('profiles')
-            .select('*')
-            .eq('clerk_user_id', user.id)
-            .single();
+        const {
+          data: profileData,
+          error: profileError,
+        } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('clerk_user_id', user.id)
+          .single();
 
         if (profileError || !profileData) {
           console.error(
@@ -517,8 +513,8 @@ export default function DashboardPage() {
 
         if (workoutData) {
           const {
-            data: workoutActivityData,
-            error: workoutActivityError,
+            data: activityData,
+            error: activityError,
           } = await supabase
             .from('workout_activity')
             .select('*')
@@ -526,22 +522,21 @@ export default function DashboardPage() {
             .eq('workout_plan_id', workoutData.id)
             .eq('week_number', workoutData.week_number);
 
-          if (workoutActivityError) {
+          if (activityError) {
             console.error(
               'Workout activity fetch error:',
-              workoutActivityError
+              activityError
             );
           } else {
             const activityMap: Record<string, boolean> = {};
 
-            (workoutActivityData || []).forEach(
-              (row: ActivityRow) => {
-                if (row.day) {
-                  activityMap[row.day] =
-                    Boolean(row.completed);
-                }
+            (activityData || []).forEach((row: any) => {
+              if (row.day) {
+                activityMap[row.day] = Boolean(
+                  row.completed
+                );
               }
-            );
+            });
 
             setWorkoutActivity(activityMap);
           }
@@ -549,8 +544,8 @@ export default function DashboardPage() {
 
         if (dietData) {
           const {
-            data: dietActivityData,
-            error: dietActivityError,
+            data: activityData,
+            error: activityError,
           } = await supabase
             .from('diet_activity')
             .select('*')
@@ -558,22 +553,21 @@ export default function DashboardPage() {
             .eq('diet_plan_id', dietData.id)
             .eq('week_number', dietData.week_number);
 
-          if (dietActivityError) {
+          if (activityError) {
             console.error(
               'Diet activity fetch error:',
-              dietActivityError
+              activityError
             );
           } else {
             const activityMap: Record<string, boolean> = {};
 
-            (dietActivityData || []).forEach(
-              (row: ActivityRow) => {
-                if (row.day) {
-                  activityMap[row.day] =
-                    Boolean(row.completed);
-                }
+            (activityData || []).forEach((row: any) => {
+              if (row.day) {
+                activityMap[row.day] = Boolean(
+                  row.completed
+                );
               }
-            );
+            });
 
             setDietActivity(activityMap);
           }
@@ -593,7 +587,6 @@ export default function DashboardPage() {
 
   async function toggleWorkoutComplete(day: string) {
     if (!profile || !workout) return;
-
     if (workoutActivityLoading[day]) return;
 
     setWorkoutActivityLoading((prev) => ({
@@ -605,15 +598,17 @@ export default function DashboardPage() {
       const currentCompleted =
         Boolean(workoutActivity[day]);
 
-      const { data: existing, error: findError } =
-        await supabase
-          .from('workout_activity')
-          .select('id')
-          .eq('user_id', profile.id)
-          .eq('workout_plan_id', workout.id)
-          .eq('week_number', workout.week_number)
-          .eq('day', day)
-          .maybeSingle();
+      const {
+        data: existing,
+        error: findError,
+      } = await supabase
+        .from('workout_activity')
+        .select('id')
+        .eq('user_id', profile.id)
+        .eq('workout_plan_id', workout.id)
+        .eq('week_number', workout.week_number)
+        .eq('day', day)
+        .maybeSingle();
 
       if (findError) {
         throw new Error(
@@ -685,7 +680,6 @@ export default function DashboardPage() {
 
   async function toggleDietComplete(day: string) {
     if (!profile || !diet) return;
-
     if (dietActivityLoading[day]) return;
 
     setDietActivityLoading((prev) => ({
@@ -697,15 +691,17 @@ export default function DashboardPage() {
       const currentCompleted =
         Boolean(dietActivity[day]);
 
-      const { data: existing, error: findError } =
-        await supabase
-          .from('diet_activity')
-          .select('id')
-          .eq('user_id', profile.id)
-          .eq('diet_plan_id', diet.id)
-          .eq('week_number', diet.week_number)
-          .eq('day', day)
-          .maybeSingle();
+      const {
+        data: existing,
+        error: findError,
+      } = await supabase
+        .from('diet_activity')
+        .select('id')
+        .eq('user_id', profile.id)
+        .eq('diet_plan_id', diet.id)
+        .eq('week_number', diet.week_number)
+        .eq('day', day)
+        .maybeSingle();
 
       if (findError) {
         throw new Error(
@@ -775,6 +771,65 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleGeneratePlan() {
+    if (generating) return;
+
+    setGenerating(true);
+
+    try {
+      const response = await fetch(
+        '/api/generate-plan',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error(
+          'Generate plan API error:',
+          data
+        );
+
+        alert(
+          data?.error ||
+            'Failed to generate your plan.'
+        );
+
+        return;
+      }
+
+      if (!data?.workout || !data?.diet) {
+        alert(
+          'Plan generated but the returned data is incomplete.'
+        );
+
+        return;
+      }
+
+      setWorkout(data.workout);
+      setDiet(data.diet);
+
+      setWorkoutActivity({});
+      setDietActivity({});
+    } catch (error) {
+      console.error(
+        'Generate plan request error:',
+        error
+      );
+
+      alert(
+        'Network error. Please try again.'
+      );
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   async function handleLogout() {
     await signOut();
     router.push('/login');
@@ -800,4 +855,102 @@ export default function DashboardPage() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-white">
-      <div className=
+      <div className="max-w-5xl mx-auto px-4 py-6">
+        <header className="flex items-center justify-between gap-4 mb-8">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold">
+              Welcome,{' '}
+              {profile?.full_name ||
+                user?.firstName ||
+                'there'}{' '}
+              👋
+            </h1>
+
+            <p className="text-slate-400 mt-1">
+              Your personalized FitAdapt plan
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="shrink-0 px-4 py-2.5 bg-red-500 hover:bg-red-600 rounded-xl font-semibold transition"
+          >
+            Logout
+          </button>
+        </header>
+
+        {!hasPlan && (
+          <section className="bg-slate-900 border border-slate-700 rounded-2xl p-6 sm:p-8 text-center">
+            <div className="text-5xl mb-4">
+              🚀
+            </div>
+
+            <h2 className="text-2xl font-bold mb-2">
+              No Active Plan
+            </h2>
+
+            <p className="text-slate-400 mb-6">
+              Generate your personalized workout
+              and diet plan based on your profile.
+            </p>
+
+            <button
+              type="button"
+              onClick={handleGeneratePlan}
+              disabled={generating}
+              className="px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-slate-700 disabled:cursor-not-allowed rounded-xl font-bold transition"
+            >
+              {generating
+                ? 'Generating...'
+                : '🚀 Generate My First Plan'}
+            </button>
+          </section>
+        )}
+
+        {hasPlan && (
+          <>
+            {workout && (
+              <WorkoutSection
+                workout={workout}
+                activity={workoutActivity}
+                activityLoading={
+                  workoutActivityLoading
+                }
+                onToggleComplete={
+                  toggleWorkoutComplete
+                }
+              />
+            )}
+
+            {diet && (
+              <DietSection
+                diet={diet}
+                activity={dietActivity}
+                activityLoading={
+                  dietActivityLoading
+                }
+                onToggleComplete={
+                  toggleDietComplete
+                }
+              />
+            )}
+
+            <div className="text-center pb-10">
+              <button
+                type="button"
+                onClick={handleGeneratePlan}
+                disabled={generating}
+                className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-700 disabled:cursor-not-allowed rounded-xl font-semibold transition"
+              >
+                {generating
+                  ? 'Generating...'
+                  : '🔄 Regenerate Plan'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </main>
+  );
+}
