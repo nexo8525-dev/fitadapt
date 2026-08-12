@@ -9,6 +9,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const { isLoaded, isSignedIn, user } = useUser();
   const { signOut } = useClerk();
+
   const [profile, setProfile] = useState<any>(null);
   const [workout, setWorkout] = useState<any>(null);
   const [diet, setDiet] = useState<any>(null);
@@ -17,6 +18,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!isLoaded) return;
+
     if (!isSignedIn) {
       router.push('/login');
       return;
@@ -24,39 +26,58 @@ export default function DashboardPage() {
 
     const fetchData = async () => {
       setLoading(true);
+
       try {
-        // Profile fetch
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('clerk_user_id', user.id)
-          .single();
+        // Get profile
+        const { data: profileData, error: profileError } =
+          await supabase
+            .from('profiles')
+            .select('*')
+            .eq('clerk_user_id', user.id)
+            .single();
+
+        if (profileError) {
+          console.error('Profile error:', profileError);
+        }
 
         if (!profileData) {
           router.push('/onboarding');
           return;
         }
+
         setProfile(profileData);
 
-        // Active workout plan
-        const { data: workoutData } = await supabase
-          .from('workout_plans')
-          .select('*')
-          .eq('user_id', profileData.id)
-          .eq('is_active', true)
-          .maybeSingle();
+        // Get workout plan
+        const { data: workoutData, error: workoutError } =
+          await supabase
+            .from('workout_plans')
+            .select('*')
+            .eq('user_id', profileData.id)
+            .eq('is_active', true)
+            .maybeSingle();
+
+        if (workoutError) {
+          console.error('Workout error:', workoutError);
+        }
+
         setWorkout(workoutData);
 
-        // Active diet plan
-        const { data: dietData } = await supabase
-          .from('diet_plans')
-          .select('*')
-          .eq('user_id', profileData.id)
-          .eq('is_active', true)
-          .maybeSingle();
+        // Get diet plan
+        const { data: dietData, error: dietError } =
+          await supabase
+            .from('diet_plans')
+            .select('*')
+            .eq('user_id', profileData.id)
+            .eq('is_active', true)
+            .maybeSingle();
+
+        if (dietError) {
+          console.error('Diet error:', dietError);
+        }
+
         setDiet(dietData);
       } catch (error) {
-        console.error(error);
+        console.error('Dashboard error:', error);
       } finally {
         setLoading(false);
       }
@@ -67,22 +88,26 @@ export default function DashboardPage() {
 
   const handleGeneratePlan = async () => {
     setGenerating(true);
+
     try {
       const response = await fetch('/api/generate-plan', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
+
       const data = await response.json();
 
       if (response.ok) {
-        alert('Plan generated! Refreshing...');
+        alert('Plan generated successfully!');
         window.location.reload();
       } else {
         alert(data.error || 'Failed to generate plan');
       }
     } catch (error) {
-      console.error(error);
-      alert('Network error');
+      console.error('Generate plan error:', error);
+      alert('Network error. Please try again.');
     } finally {
       setGenerating(false);
     }
@@ -93,48 +118,130 @@ export default function DashboardPage() {
     router.push('/login');
   };
 
-  if (loading) return <div className="p-8 text-center">Loading...</div>;
+  if (!isLoaded || loading) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
+        <div className="text-center">
+          <div className="text-3xl mb-3">⚡</div>
+          <p className="text-slate-300">Loading your dashboard...</p>
+        </div>
+      </main>
+    );
+  }
 
   return (
-    <div className="max-w-4xl mx-auto p-4">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Welcome, {profile?.full_name} 👋</h1>
-        <button onClick={handleLogout} className="px-4 py-2 bg-red-500 text-white rounded">
-          Logout
-        </button>
-      </div>
+    <main className="min-h-screen bg-slate-950 text-white">
+      <div className="max-w-5xl mx-auto px-4 py-6">
 
-      {!workout && !diet && (
-        <div className="bg-yellow-50 border p-6 rounded-lg text-center">
-          <h2 className="text-xl font-semibold">No Active Plan</h2>
-          <p className="text-gray-600 mb-4">Generate your first personalized plan.</p>
+        {/* Header */}
+        <div className="flex items-center justify-between gap-4 mb-8">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold">
+              Welcome, {profile?.full_name || user?.firstName || 'there'} 👋
+            </h1>
+
+            <p className="text-slate-400 mt-1">
+              Your personalized FitAdapt plan
+            </p>
+          </div>
+
           <button
-            onClick={handleGeneratePlan}
-            disabled={generating}
-            className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
+            onClick={handleLogout}
+            className="shrink-0 px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-xl transition"
           >
-            {generating ? 'Generating...' : '🚀 Generate My First Plan'}
+            Logout
           </button>
         </div>
-      )}
 
-      {workout && (
-        <div className="border rounded-lg p-4 mb-4">
-          <h2 className="text-xl font-bold">🏋️ Workout - Week {workout.week_number}</h2>
-          <pre className="bg-gray-100 p-3 rounded text-sm overflow-auto max-h-96">
-            {JSON.stringify(workout.plan_data, null, 2)}
-          </pre>
-        </div>
-      )}
+        {/* No Plan */}
+        {!workout && !diet && (
+          <section className="bg-slate-900 border border-slate-700 rounded-2xl p-6 text-center shadow-lg">
+            <div className="text-5xl mb-4">🚀</div>
 
-      {diet && (
-        <div className="border rounded-lg p-4">
-          <h2 className="text-xl font-bold">🥗 Diet - Week {diet.week_number}</h2>
-          <pre className="bg-gray-100 p-3 rounded text-sm overflow-auto max-h-96">
-            {JSON.stringify(diet.plan_data, null, 2)}
-          </pre>
-        </div>
-      )}
-    </div>
+            <h2 className="text-2xl font-bold mb-2">
+              Your plan is ready to be created
+            </h2>
+
+            <p className="text-slate-400 mb-6">
+              Generate your personalized workout and diet plan based on your profile.
+            </p>
+
+            <button
+              onClick={handleGeneratePlan}
+              disabled={generating}
+              className="px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-slate-600 text-white font-bold rounded-xl transition"
+            >
+              {generating ? 'Generating your plan...' : '🚀 Generate My Plan'}
+            </button>
+          </section>
+        )}
+
+        {/* Workout */}
+        {workout && (
+          <section className="bg-slate-900 border border-slate-700 rounded-2xl p-4 sm:p-6 mb-6 shadow-lg">
+
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-xl sm:text-2xl font-bold">
+                  🏋️ Workout - Week {workout.week_number}
+                </h2>
+
+                <p className="text-slate-400 text-sm mt-1">
+                  Your personalized 7-day workout plan
+                </p>
+              </div>
+            </div>
+
+            {/* IMPORTANT: dark text so JSON is visible */}
+            <div className="bg-slate-100 rounded-xl p-4 overflow-x-auto">
+              <pre className="text-slate-900 text-sm leading-6 whitespace-pre-wrap break-words">
+                {JSON.stringify(workout.plan_data, null, 2)}
+              </pre>
+            </div>
+
+          </section>
+        )}
+
+        {/* Diet */}
+        {diet && (
+          <section className="bg-slate-900 border border-slate-700 rounded-2xl p-4 sm:p-6 mb-6 shadow-lg">
+
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-xl sm:text-2xl font-bold">
+                  🥗 Diet - Week {diet.week_number}
+                </h2>
+
+                <p className="text-slate-400 text-sm mt-1">
+                  Your personalized 7-day diet plan
+                </p>
+              </div>
+            </div>
+
+            {/* IMPORTANT: dark text so JSON is visible */}
+            <div className="bg-slate-100 rounded-xl p-4 overflow-x-auto">
+              <pre className="text-slate-900 text-sm leading-6 whitespace-pre-wrap break-words">
+                {JSON.stringify(diet.plan_data, null, 2)}
+              </pre>
+            </div>
+
+          </section>
+        )}
+
+        {/* Generate another plan */}
+        {(workout || diet) && (
+          <div className="text-center pb-8">
+            <button
+              onClick={handleGeneratePlan}
+              disabled={generating}
+              className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-600 text-white font-semibold rounded-xl transition"
+            >
+              {generating ? 'Generating...' : '🔄 Regenerate Plan'}
+            </button>
+          </div>
+        )}
+
+      </div>
+    </main>
   );
-          }
+  }
