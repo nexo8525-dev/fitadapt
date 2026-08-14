@@ -2,8 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useUser, useClerk } from '@clerk/nextjs';
-import { supabase } from '@/lib/supabase';
+import {
+  useUser,
+  useClerk,
+  useAuth,
+} from '@clerk/nextjs';
+import { createSupabaseClient } from '@/lib/supabase';
 
 type Exercise = {
   name?: string;
@@ -92,19 +96,20 @@ function MealCard({
         </p>
       )}
 
-      {Array.isArray(meal.items) && meal.items.length > 0 && (
-        <ul className="space-y-1.5 mb-4">
-          {meal.items.map((item, index) => (
-            <li
-              key={index}
-              className="text-slate-300 text-sm flex gap-2"
-            >
-              <span>•</span>
-              <span>{item}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {Array.isArray(meal.items) &&
+        meal.items.length > 0 && (
+          <ul className="space-y-1.5 mb-4">
+            {meal.items.map((item, index) => (
+              <li
+                key={index}
+                className="text-slate-300 text-sm flex gap-2"
+              >
+                <span>•</span>
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        )}
 
       <div className="flex flex-wrap gap-2">
         {meal.approx_calories !== undefined && (
@@ -174,7 +179,8 @@ function WorkoutDayCard({
               className="rounded-xl bg-slate-900 border border-slate-700 p-3"
             >
               <h4 className="font-bold text-white">
-                {index + 1}. {exercise?.name || 'Exercise'}
+                {index + 1}.{' '}
+                {exercise?.name || 'Exercise'}
               </h4>
 
               <div className="flex flex-wrap gap-2 mt-2">
@@ -260,7 +266,9 @@ function WorkoutSection({
             data={data?.[day] || {}}
             completed={Boolean(activity[day])}
             loading={Boolean(activityLoading[day])}
-            onToggleComplete={() => onToggleComplete(day)}
+            onToggleComplete={() =>
+              onToggleComplete(day)
+            }
           />
         ))}
       </div>
@@ -297,7 +305,8 @@ function DietDayCard({
 
           {data.daily_total_protein_g !== undefined && (
             <span className="text-xs bg-slate-800 text-slate-300 rounded-lg px-2.5 py-1.5">
-              💪 {data.daily_total_protein_g}g protein
+              💪 {data.daily_total_protein_g}g
+              protein
             </span>
           )}
         </div>
@@ -320,23 +329,24 @@ function DietDayCard({
         />
       </div>
 
-      {Array.isArray(data.snacks) && data.snacks.length > 0 && (
-        <div className="mt-3">
-          <h4 className="text-white font-bold mb-2">
-            🍎 Snacks
-          </h4>
+      {Array.isArray(data.snacks) &&
+        data.snacks.length > 0 && (
+          <div className="mt-3">
+            <h4 className="text-white font-bold mb-2">
+              🍎 Snacks
+            </h4>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {data.snacks.map((snack, index) => (
-              <MealCard
-                key={index}
-                title={`Snack ${index + 1}`}
-                meal={snack}
-              />
-            ))}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {data.snacks.map((snack, index) => (
+                <MealCard
+                  key={index}
+                  title={`Snack ${index + 1}`}
+                  meal={snack}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
       <button
         type="button"
@@ -394,7 +404,9 @@ function DietSection({
               data={dayData}
               completed={Boolean(activity[day])}
               loading={Boolean(activityLoading[day])}
-              onToggleComplete={() => onToggleComplete(day)}
+              onToggleComplete={() =>
+                onToggleComplete(day)
+              }
             />
           );
         })}
@@ -412,11 +424,14 @@ export default function DashboardPage() {
     user,
   } = useUser();
 
+  const { getToken } = useAuth();
   const { signOut } = useClerk();
 
   const [profile, setProfile] = useState<any>(null);
-  const [workout, setWorkout] = useState<PlanRow | null>(null);
-  const [diet, setDiet] = useState<PlanRow | null>(null);
+  const [workout, setWorkout] =
+    useState<PlanRow | null>(null);
+  const [diet, setDiet] =
+    useState<PlanRow | null>(null);
 
   const [workoutActivity, setWorkoutActivity] =
     useState<Record<string, boolean>>({});
@@ -424,14 +439,23 @@ export default function DashboardPage() {
   const [dietActivity, setDietActivity] =
     useState<Record<string, boolean>>({});
 
-  const [workoutActivityLoading, setWorkoutActivityLoading] =
-    useState<Record<string, boolean>>({});
+  const [
+    workoutActivityLoading,
+    setWorkoutActivityLoading,
+  ] = useState<Record<string, boolean>>({});
 
-  const [dietActivityLoading, setDietActivityLoading] =
-    useState<Record<string, boolean>>({});
+  const [
+    dietActivityLoading,
+    setDietActivityLoading,
+  ] = useState<Record<string, boolean>>({});
 
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
+  const [generating, setGenerating] =
+    useState(false);
+
+  function getSupabase() {
+    return createSupabaseClient(getToken);
+  }
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -445,6 +469,8 @@ export default function DashboardPage() {
       setLoading(true);
 
       try {
+        const supabase = getSupabase();
+
         const {
           data: profileData,
           error: profileError,
@@ -519,8 +545,14 @@ export default function DashboardPage() {
             .from('workout_activity')
             .select('*')
             .eq('user_id', profileData.id)
-            .eq('workout_plan_id', workoutData.id)
-            .eq('week_number', workoutData.week_number);
+            .eq(
+              'workout_plan_id',
+              workoutData.id
+            )
+            .eq(
+              'week_number',
+              workoutData.week_number
+            );
 
           if (activityError) {
             console.error(
@@ -528,15 +560,19 @@ export default function DashboardPage() {
               activityError
             );
           } else {
-            const activityMap: Record<string, boolean> = {};
+            const activityMap: Record<
+              string,
+              boolean
+            > = {};
 
-            (activityData || []).forEach((row: any) => {
-              if (row.day) {
-                activityMap[row.day] = Boolean(
-                  row.completed
-                );
+            (activityData || []).forEach(
+              (row: any) => {
+                if (row.day) {
+                  activityMap[row.day] =
+                    Boolean(row.completed);
+                }
               }
-            });
+            );
 
             setWorkoutActivity(activityMap);
           }
@@ -550,8 +586,14 @@ export default function DashboardPage() {
             .from('diet_activity')
             .select('*')
             .eq('user_id', profileData.id)
-            .eq('diet_plan_id', dietData.id)
-            .eq('week_number', dietData.week_number);
+            .eq(
+              'diet_plan_id',
+              dietData.id
+            )
+            .eq(
+              'week_number',
+              dietData.week_number
+            );
 
           if (activityError) {
             console.error(
@@ -559,15 +601,19 @@ export default function DashboardPage() {
               activityError
             );
           } else {
-            const activityMap: Record<string, boolean> = {};
+            const activityMap: Record<
+              string,
+              boolean
+            > = {};
 
-            (activityData || []).forEach((row: any) => {
-              if (row.day) {
-                activityMap[row.day] = Boolean(
-                  row.completed
-                );
+            (activityData || []).forEach(
+              (row: any) => {
+                if (row.day) {
+                  activityMap[row.day] =
+                    Boolean(row.completed);
+                }
               }
-            });
+            );
 
             setDietActivity(activityMap);
           }
@@ -583,9 +629,17 @@ export default function DashboardPage() {
     }
 
     loadDashboard();
-  }, [isLoaded, isSignedIn, user, router]);
+  }, [
+    isLoaded,
+    isSignedIn,
+    user,
+    router,
+    getToken,
+  ]);
 
-  async function toggleWorkoutComplete(day: string) {
+  async function toggleWorkoutComplete(
+    day: string
+  ) {
     if (!profile || !workout) return;
     if (workoutActivityLoading[day]) return;
 
@@ -595,6 +649,8 @@ export default function DashboardPage() {
     }));
 
     try {
+      const supabase = getSupabase();
+
       const currentCompleted =
         Boolean(workoutActivity[day]);
 
@@ -605,8 +661,14 @@ export default function DashboardPage() {
         .from('workout_activity')
         .select('id')
         .eq('user_id', profile.id)
-        .eq('workout_plan_id', workout.id)
-        .eq('week_number', workout.week_number)
+        .eq(
+          'workout_plan_id',
+          workout.id
+        )
+        .eq(
+          'week_number',
+          workout.week_number
+        )
         .eq('day', day)
         .maybeSingle();
 
@@ -678,7 +740,9 @@ export default function DashboardPage() {
     }
   }
 
-  async function toggleDietComplete(day: string) {
+  async function toggleDietComplete(
+    day: string
+  ) {
     if (!profile || !diet) return;
     if (dietActivityLoading[day]) return;
 
@@ -688,6 +752,8 @@ export default function DashboardPage() {
     }));
 
     try {
+      const supabase = getSupabase();
+
       const currentCompleted =
         Boolean(dietActivity[day]);
 
@@ -698,8 +764,14 @@ export default function DashboardPage() {
         .from('diet_activity')
         .select('id')
         .eq('user_id', profile.id)
-        .eq('diet_plan_id', diet.id)
-        .eq('week_number', diet.week_number)
+        .eq(
+          'diet_plan_id',
+          diet.id
+        )
+        .eq(
+          'week_number',
+          diet.week_number
+        )
         .eq('day', day)
         .maybeSingle();
 
