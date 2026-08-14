@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useUser, useClerk, useAuth } from '@clerk/nextjs';
+import { useUser, useClerk } from '@clerk/nextjs';
 import { createSupabaseClient } from '@/lib/supabase';
 
 type Exercise = {
@@ -47,7 +47,6 @@ type Profile = {
   id: string;
   clerk_user_id: string;
   full_name?: string;
-  [key: string]: any;
 };
 
 const DAYS = [
@@ -391,20 +390,16 @@ function DietSection({
       </div>
 
       <div className="space-y-6">
-        {DAYS.map((day) => {
-          const dayData: DietDay = data?.[day] || {};
-
-          return (
-            <DietDayCard
-              key={day}
-              day={day}
-              data={dayData}
-              completed={Boolean(activity[day])}
-              loading={Boolean(activityLoading[day])}
-              onToggleComplete={() => onToggleComplete(day)}
-            />
-          );
-        })}
+        {DAYS.map((day) => (
+          <DietDayCard
+            key={day}
+            day={day}
+            data={data?.[day] || {}}
+            completed={Boolean(activity[day])}
+            loading={Boolean(activityLoading[day])}
+            onToggleComplete={() => onToggleComplete(day)}
+          />
+        ))}
       </div>
     </section>
   );
@@ -417,15 +412,10 @@ export default function DashboardPage() {
     isLoaded,
     isSignedIn,
     user,
+    getToken,
   } = useUser();
 
-  const { getToken } = useAuth();
   const { signOut } = useClerk();
-
-  const supabase = useMemo(
-    () => createSupabaseClient(getToken),
-    [getToken]
-  );
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [workout, setWorkout] = useState<PlanRow | null>(null);
@@ -458,6 +448,12 @@ export default function DashboardPage() {
       setLoading(true);
 
       try {
+        // IMPORTANT:
+        // Supabase client now receives the Clerk session token.
+        const supabase = createSupabaseClient(getToken);
+
+        console.log('Dashboard: checking profile for Clerk user:', user.id);
+
         const {
           data: profileData,
           error: profileError,
@@ -469,26 +465,24 @@ export default function DashboardPage() {
 
         if (profileError) {
           console.error(
-            'Profile fetch error:',
+            'PROFILE FETCH ERROR:',
             profileError
-          );
-
-          alert(
-            `Profile fetch failed: ${profileError.message}`
-          );
-
-          return;
-        }
-
-        if (!profileData) {
-          console.error(
-            'Profile not found for Clerk user:',
-            user.id
           );
 
           router.push('/onboarding');
           return;
         }
+
+        if (!profileData) {
+          console.log(
+            'No profile found. Redirecting to onboarding.'
+          );
+
+          router.push('/onboarding');
+          return;
+        }
+
+        console.log('Profile found:', profileData.id);
 
         setProfile(profileData);
 
@@ -603,12 +597,6 @@ export default function DashboardPage() {
           'Dashboard loading error:',
           error
         );
-
-        alert(
-          error instanceof Error
-            ? error.message
-            : 'Failed to load dashboard.'
-        );
       } finally {
         setLoading(false);
       }
@@ -620,7 +608,7 @@ export default function DashboardPage() {
     isSignedIn,
     user,
     router,
-    supabase,
+    getToken,
   ]);
 
   async function toggleWorkoutComplete(day: string) {
@@ -633,6 +621,8 @@ export default function DashboardPage() {
     }));
 
     try {
+      const supabase = createSupabaseClient(getToken);
+
       const currentCompleted =
         Boolean(workoutActivity[day]);
 
@@ -726,6 +716,8 @@ export default function DashboardPage() {
     }));
 
     try {
+      const supabase = createSupabaseClient(getToken);
+
       const currentCompleted =
         Boolean(dietActivity[day]);
 
@@ -925,12 +917,11 @@ export default function DashboardPage() {
             </div>
 
             <h2 className="text-2xl font-bold mb-2">
-              No Active Plan
+              Setup Complete!
             </h2>
 
             <p className="text-slate-400 mb-6">
-              Generate your personalized workout
-              and diet plan based on your profile.
+              Your profile is ready. Generate your personalized workout and diet plan.
             </p>
 
             <button
@@ -941,7 +932,7 @@ export default function DashboardPage() {
             >
               {generating
                 ? 'Generating...'
-                : '🚀 Generate My First Plan'}
+                : '🚀 Generate My Plan'}
             </button>
           </section>
         )}
