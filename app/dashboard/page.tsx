@@ -430,8 +430,15 @@ export default function DashboardPage() {
   const [generating, setGenerating] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
+  /*
+   * IMPORTANT:
+   * Clerk must issue the Supabase JWT template here.
+   * This token is required by the Supabase RLS policies.
+   */
   const supabase = createSupabaseClient(async () => {
-    return await getToken();
+    return await getToken({
+      template: 'supabase',
+    });
   });
 
   useEffect(() => {
