@@ -3,36 +3,24 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUser } from '@clerk/nextjs';
-import { supabase } from '@/lib/supabase';
 
 export default function HomePage() {
   const router = useRouter();
-  const { isLoaded, isSignedIn, user } = useUser();
+  const { isLoaded, isSignedIn } = useUser();
 
   useEffect(() => {
     if (!isLoaded) return;
 
-    if (!isSignedIn) {
-      router.push('/login');
-      return;
+    if (isSignedIn) {
+      router.replace('/dashboard');
+    } else {
+      router.replace('/login');
     }
+  }, [isLoaded, isSignedIn, router]);
 
-    const checkProfile = async () => {
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('clerk_user_id', user.id)
-        .maybeSingle();
-
-      if (profile) {
-        router.push('/dashboard');
-      } else {
-        router.push('/onboarding');
-      }
-    };
-
-    checkProfile();
-  }, [isLoaded, isSignedIn, user, router]);
-
-  return <div>Loading...</div>;
+  return (
+    <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
+      <p className="text-slate-300">Loading...</p>
+    </main>
+  );
 }
