@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth, useUser, useClerk } from '@clerk/nextjs';
 import { createSupabaseClient } from '@/lib/supabase';
@@ -56,9 +56,7 @@ const DAYS = [
 function normalizePlanData(data: any) {
   if (!data) return {};
 
-  if (typeof data === 'object') {
-    return data;
-  }
+  if (typeof data === 'object') return data;
 
   if (typeof data === 'string') {
     try {
@@ -304,20 +302,9 @@ function DietDayCard({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <MealCard
-          title="🌅 Breakfast"
-          meal={data.breakfast}
-        />
-
-        <MealCard
-          title="☀️ Lunch"
-          meal={data.lunch}
-        />
-
-        <MealCard
-          title="🌙 Dinner"
-          meal={data.dinner}
-        />
+        <MealCard title="🌅 Breakfast" meal={data.breakfast} />
+        <MealCard title="☀️ Lunch" meal={data.lunch} />
+        <MealCard title="🌙 Dinner" meal={data.dinner} />
       </div>
 
       {Array.isArray(data.snacks) && data.snacks.length > 0 && (
@@ -384,20 +371,16 @@ function DietSection({
       </div>
 
       <div className="space-y-6">
-        {DAYS.map((day) => {
-          const dayData: DietDay = data?.[day] || {};
-
-          return (
-            <DietDayCard
-              key={day}
-              day={day}
-              data={dayData}
-              completed={Boolean(activity[day])}
-              loading={Boolean(activityLoading[day])}
-              onToggleComplete={() => onToggleComplete(day)}
-            />
-          );
-        })}
+        {DAYS.map((day) => (
+          <DietDayCard
+            key={day}
+            day={day}
+            data={data?.[day] || {}}
+            completed={Boolean(activity[day])}
+            loading={Boolean(activityLoading[day])}
+            onToggleComplete={() => onToggleComplete(day)}
+          />
+        ))}
       </div>
     </section>
   );
@@ -405,10 +388,19 @@ function DietSection({
 
 export default function DashboardPage() {
   const router = useRouter();
-
   const { isLoaded, isSignedIn, user } = useUser();
   const { getToken } = useAuth();
   const { signOut } = useClerk();
+
+  const userId = user?.id ?? null;
+
+  const supabase = useMemo(() => {
+    return createSupabaseClient(async () => {
+      return await getToken({
+        template: 'supabase',
+      });
+    });
+  }, [getToken]);
 
   const [profile, setProfile] = useState<any>(null);
   const [workout, setWorkout] = useState<PlanRow | null>(null);
@@ -430,21 +422,10 @@ export default function DashboardPage() {
   const [generating, setGenerating] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  /*
-   * IMPORTANT:
-   * Clerk must issue the Supabase JWT template here.
-   * This token is required by the Supabase RLS policies.
-   */
-  const supabase = createSupabaseClient(async () => {
-    return await getToken({
-      template: 'supabase',
-    });
-  });
-
   useEffect(() => {
     if (!isLoaded) return;
 
-    if (!isSignedIn || !user) {
+    if (!isSignedIn || !userId) {
       router.replace('/login');
       return;
     }
@@ -456,34 +437,26 @@ export default function DashboardPage() {
       setErrorMessage('');
 
       try {
+        console.log('Dashboard: loading profile for', userId);
+
         const {
           data: profileData,
           error: profileError,
         } = await supabase
           .from('profiles')
           .select('*')
-          .eq('clerk_user_id', user.id)
+          .eq('clerk_user_id', userId)
           .maybeSingle();
 
         if (profileError) {
-          console.error(
-            'Profile fetch error:',
-            profileError
+          throw new Error(
+            `Profile fetch failed: ${profileError.message}`
           );
-
-          if (!cancelled) {
-            setErrorMessage(
-              `Profile could not be loaded: ${profileError.message}`
-            );
-          }
-
-          return;
         }
 
         if (!profileData) {
-          console.error(
-            'No profile found for Clerk user:',
-            user.id
+          console.log(
+            'Dashboard: profile not found, sending to onboarding'
           );
 
           if (!cancelled) {
@@ -494,6 +467,8 @@ export default function DashboardPage() {
         }
 
         if (cancelled) return;
+
+        console.log('Dashboard: profile loaded');
 
         setProfile(profileData);
 
@@ -565,9 +540,7 @@ export default function DashboardPage() {
 
             (activityData || []).forEach((row: any) => {
               if (row.day) {
-                activityMap[row.day] = Boolean(
-                  row.completed
-                );
+                activityMap[row.day] = Boolean(row.completed);
               }
             });
 
@@ -596,20 +569,17 @@ export default function DashboardPage() {
 
             (activityData || []).forEach((row: any) => {
               if (row.day) {
-                activityMap[row.day] = Boolean(
-                  row.completed
-                );
+                activityMap[row.day] = Boolean(row.completed);
               }
             });
 
             setDietActivity(activityMap);
           }
         }
+
+        console.log('Dashboard: finished loading');
       } catch (error) {
-        console.error(
-          'Dashboard loading error:',
-          error
-        );
+        console.error('Dashboard loading error:', error);
 
         if (!cancelled) {
           setErrorMessage(
@@ -633,9 +603,9 @@ export default function DashboardPage() {
   }, [
     isLoaded,
     isSignedIn,
-    user,
+    userId,
     router,
-    getToken,
+    supabase,
   ]);
 
   async function toggleWorkoutComplete(day: string) {
@@ -648,20 +618,19 @@ export default function DashboardPage() {
     }));
 
     try {
-      const currentCompleted =
-        Boolean(workoutActivity[day]);
+      const currentCompleted = Boolean(
+        workoutActivity[day]
+      );
 
-      const {
-        data: existing,
-        error: findError,
-      } = await supabase
-        .from('workout_activity')
-        .select('id')
-        .eq('user_id', profile.id)
-        .eq('workout_plan_id', workout.id)
-        .eq('week_number', workout.week_number)
-        .eq('day', day)
-        .maybeSingle();
+      const { data: existing, error: findError } =
+        await supabase
+          .from('workout_activity')
+          .select('id')
+          .eq('user_id', profile.id)
+          .eq('workout_plan_id', workout.id)
+          .eq('week_number', workout.week_number)
+          .eq('day', day)
+          .maybeSingle();
 
       if (findError) {
         throw new Error(
@@ -713,10 +682,7 @@ export default function DashboardPage() {
         [day]: newCompleted,
       }));
     } catch (error) {
-      console.error(
-        'Workout activity error:',
-        error
-      );
+      console.error('Workout activity error:', error);
 
       alert(
         error instanceof Error
@@ -741,20 +707,19 @@ export default function DashboardPage() {
     }));
 
     try {
-      const currentCompleted =
-        Boolean(dietActivity[day]);
+      const currentCompleted = Boolean(
+        dietActivity[day]
+      );
 
-      const {
-        data: existing,
-        error: findError,
-      } = await supabase
-        .from('diet_activity')
-        .select('id')
-        .eq('user_id', profile.id)
-        .eq('diet_plan_id', diet.id)
-        .eq('week_number', diet.week_number)
-        .eq('day', day)
-        .maybeSingle();
+      const { data: existing, error: findError } =
+        await supabase
+          .from('diet_activity')
+          .select('id')
+          .eq('user_id', profile.id)
+          .eq('diet_plan_id', diet.id)
+          .eq('week_number', diet.week_number)
+          .eq('day', day)
+          .maybeSingle();
 
       if (findError) {
         throw new Error(
@@ -806,10 +771,7 @@ export default function DashboardPage() {
         [day]: newCompleted,
       }));
     } catch (error) {
-      console.error(
-        'Diet activity error:',
-        error
-      );
+      console.error('Diet activity error:', error);
 
       alert(
         error instanceof Error
@@ -830,43 +792,32 @@ export default function DashboardPage() {
     setGenerating(true);
 
     try {
-      const response = await fetch(
-        '/api/generate-plan',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const response = await fetch('/api/generate-plan', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
 
       const data = await response.json();
 
       if (!response.ok) {
-        console.error(
-          'Generate plan API error:',
-          data
-        );
-
         alert(
           data?.error ||
             'Failed to generate your plan.'
         );
-
         return;
       }
 
       if (!data?.workout || !data?.diet) {
         alert(
-          'Plan generated but the returned data is incomplete.'
+          'Plan generated but returned data is incomplete.'
         );
-
         return;
       }
 
       setWorkout(data.workout);
       setDiet(data.diet);
-
       setWorkoutActivity({});
       setDietActivity({});
     } catch (error) {
@@ -875,9 +826,7 @@ export default function DashboardPage() {
         error
       );
 
-      alert(
-        'Network error. Please try again.'
-      );
+      alert('Network error. Please try again.');
     } finally {
       setGenerating(false);
     }
@@ -888,19 +837,21 @@ export default function DashboardPage() {
     router.replace('/login');
   }
 
-  if (!isLoaded || loading) {
+  if (!isLoaded) {
     return (
-      <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
-        <div className="text-center">
-          <div className="text-4xl mb-3">
-            ⚡
-          </div>
+      <LoadingScreen text="Checking authentication..." />
+    );
+  }
 
-          <p className="text-slate-300">
-            Loading your dashboard...
-          </p>
-        </div>
-      </main>
+  if (!isSignedIn || !userId) {
+    return (
+      <LoadingScreen text="Redirecting to login..." />
+    );
+  }
+
+  if (loading) {
+    return (
+      <LoadingScreen text="Loading your dashboard..." />
     );
   }
 
@@ -914,10 +865,6 @@ export default function DashboardPage() {
 
           <p className="text-slate-300 text-sm break-words">
             {errorMessage}
-          </p>
-
-          <p className="text-slate-500 text-xs mt-4">
-            Check the browser console for more details.
           </p>
 
           <button
@@ -955,7 +902,7 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={handleLogout}
-            className="shrink-0 px-4 py-2.5 bg-red-500 hover:bg-red-600 rounded-xl font-semibold transition"
+            className="shrink-0 px-4 py-2.5 bg-red-500 hover:bg-red-600 rounded-xl font-semibold"
           >
             Logout
           </button>
@@ -963,24 +910,22 @@ export default function DashboardPage() {
 
         {!hasPlan && (
           <section className="bg-slate-900 border border-slate-700 rounded-2xl p-6 sm:p-8 text-center">
-            <div className="text-5xl mb-4">
-              🚀
-            </div>
+            <div className="text-5xl mb-4">🚀</div>
 
             <h2 className="text-2xl font-bold mb-2">
               No Active Plan
             </h2>
 
             <p className="text-slate-400 mb-6">
-              Generate your personalized workout
-              and diet plan based on your profile.
+              Generate your personalized workout and diet
+              plan based on your profile.
             </p>
 
             <button
               type="button"
               onClick={handleGeneratePlan}
               disabled={generating}
-              className="px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-slate-700 disabled:cursor-not-allowed rounded-xl font-bold transition"
+              className="px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-slate-700 rounded-xl font-bold"
             >
               {generating
                 ? 'Generating...'
@@ -1022,7 +967,7 @@ export default function DashboardPage() {
                 type="button"
                 onClick={handleGeneratePlan}
                 disabled={generating}
-                className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-700 disabled:cursor-not-allowed rounded-xl font-semibold transition"
+                className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-700 rounded-xl font-semibold"
               >
                 {generating
                   ? 'Generating...'
@@ -1031,6 +976,22 @@ export default function DashboardPage() {
             </div>
           </>
         )}
+      </div>
+    </main>
+  );
+}
+
+function LoadingScreen({ text }: { text: string }) {
+  return (
+    <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
+      <div className="text-center">
+        <div className="text-4xl mb-3 animate-pulse">
+          ⚡
+        </div>
+
+        <p className="text-slate-300">
+          {text}
+        </p>
       </div>
     </main>
   );
