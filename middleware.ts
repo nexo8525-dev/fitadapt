@@ -4,6 +4,7 @@ export default clerkMiddleware();
 
 export const config = {
   matcher: [
+    '/',
     '/dashboard(.*)',
     '/onboarding(.*)',
     '/api/(.*)',
