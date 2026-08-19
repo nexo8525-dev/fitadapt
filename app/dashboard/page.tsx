@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useUser } from '@clerk/nextjs';
-import { supabase } from '@/lib/supabase'; // adjust path if needed
+import { supabase } from '@/lib/supabase'; // ← adjust if your supabase client is elsewhere
 
 // ============================================================
 // Types
@@ -268,7 +268,7 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      {/* Custom Modal */}
+      {/* Custom Modal (no external dependencies) */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl mx-4">
