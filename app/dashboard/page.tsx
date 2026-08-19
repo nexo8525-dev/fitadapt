@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useUser } from '@clerk/nextjs';
-import { supabase } from '@/lib/supabase'; // ← adjust if your supabase client is elsewhere
+import { supabase } from '@/lib/supabase'; // ✅ CORRECT import – no "/client"
 
 // ============================================================
 // Types
@@ -388,4 +388,4 @@ export default function DashboardPage() {
       )}
     </div>
   );
-}
+        }
