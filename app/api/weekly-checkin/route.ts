@@ -3,39 +3,42 @@ import { createClient } from '@supabase/supabase-js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 // ============================================================
-// Environment Variables
+// Environment
 // ============================================================
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseUrl =
+  process.env.NEXT_PUBLIC_SUPABASE_URL;
+
 const supabaseServiceRoleKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY;
-const geminiApiKey = process.env.GEMINI_API_KEY;
 
-// ============================================================
-// Environment Validation
-// ============================================================
+const geminiApiKey =
+  process.env.GEMINI_API_KEY;
 
 if (!supabaseUrl) {
   throw new Error(
-    'NEXT_PUBLIC_SUPABASE_URL is not configured'
+    'NEXT_PUBLIC_SUPABASE_URL is missing'
   );
 }
 
 if (!supabaseServiceRoleKey) {
   throw new Error(
-    'SUPABASE_SERVICE_ROLE_KEY is not configured'
+    'SUPABASE_SERVICE_ROLE_KEY is missing'
   );
 }
 
 if (!geminiApiKey) {
   throw new Error(
-    'GEMINI_API_KEY is not configured'
+    'GEMINI_API_KEY is missing'
   );
 }
 
 // ============================================================
-// Supabase Server Client
+// Server-only Supabase client
 // ============================================================
 
 const supabase = createClient(
@@ -47,35 +50,41 @@ const supabase = createClient(
 // Gemini
 // ============================================================
 
-const genAI = new GoogleGenerativeAI(
-  geminiApiKey
-);
+const genAI =
+  new GoogleGenerativeAI(geminiApiKey);
 
-const model = genAI.getGenerativeModel({
-  model: 'gemini-2.5-flash',
-});
+const model =
+  genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash',
+  });
 
 // ============================================================
 // Types
 // ============================================================
 
+type WorkoutDifficulty =
+  | 'Too Easy'
+  | 'Just Right'
+  | 'Too Hard';
+
 interface CheckinRequest {
   weight_kg: number;
-  workout_difficulty:
-    | 'Too Easy'
-    | 'Just Right'
-    | 'Too Hard';
+  workout_difficulty: WorkoutDifficulty;
   energy_rating: number;
   user_notes?: string;
 }
 
 // ============================================================
-// Validate Request
+// Validation
 // ============================================================
 
 function validateRequest(
   body: any
 ): CheckinRequest {
+  if (!body || typeof body !== 'object') {
+    throw new Error('Invalid request body');
+  }
+
   const {
     weight_kg,
     workout_difficulty,
@@ -93,12 +102,16 @@ function validateRequest(
     );
   }
 
+  const validDifficulties = [
+    'Too Easy',
+    'Just Right',
+    'Too Hard',
+  ];
+
   if (
-    ![
-      'Too Easy',
-      'Just Right',
-      'Too Hard',
-    ].includes(workout_difficulty)
+    !validDifficulties.includes(
+      workout_difficulty
+    )
   ) {
     throw new Error(
       'Invalid workout_difficulty'
@@ -128,7 +141,7 @@ function validateRequest(
 }
 
 // ============================================================
-// Count Completed Activities
+// Activity counts
 // ============================================================
 
 async function countCompletedActivities(
@@ -150,7 +163,7 @@ async function countCompletedActivities(
 
   if (workoutError) {
     throw new Error(
-      `Failed to fetch workout_activity: ${workoutError.message}`
+      `Workout activity error: ${workoutError.message}`
     );
   }
 
@@ -169,7 +182,7 @@ async function countCompletedActivities(
 
   if (dietError) {
     throw new Error(
-      `Failed to fetch diet_activity: ${dietError.message}`
+      `Diet activity error: ${dietError.message}`
     );
   }
 
@@ -182,7 +195,7 @@ async function countCompletedActivities(
 }
 
 // ============================================================
-// POST /api/weekly-checkin
+// POST
 // ============================================================
 
 export async function POST(
@@ -190,7 +203,7 @@ export async function POST(
 ) {
   try {
     // --------------------------------------------------------
-    // 1. Authentication
+    // Authentication
     // --------------------------------------------------------
 
     const { userId } = await auth();
@@ -207,7 +220,7 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 2. Parse Request
+    // Body
     // --------------------------------------------------------
 
     let body: any;
@@ -226,19 +239,19 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 3. Validate Request
+    // Validation
     // --------------------------------------------------------
 
-    let checkinData: CheckinRequest;
+    let checkin: CheckinRequest;
 
     try {
-      checkinData =
+      checkin =
         validateRequest(body);
     } catch (error: any) {
       return NextResponse.json(
         {
           error:
-            error.message ||
+            error?.message ||
             'Invalid request',
         },
         {
@@ -248,7 +261,7 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 4. Fetch Profile
+    // Profile
     // --------------------------------------------------------
 
     const {
@@ -261,17 +274,26 @@ export async function POST(
         'clerk_user_id',
         userId
       )
-      .single();
+      .maybeSingle();
 
-    if (
-      profileError ||
-      !profile
-    ) {
+    if (profileError) {
       console.error(
-        'Profile fetch error:',
+        'Profile error:',
         profileError
       );
 
+      return NextResponse.json(
+        {
+          error:
+            'Failed to fetch profile',
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    if (!profile) {
       return NextResponse.json(
         {
           error:
@@ -284,12 +306,12 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 5. Fetch Active Workout Plan
+    // Active workout
     // --------------------------------------------------------
 
     const {
       data: workoutPlan,
-      error: workoutError,
+      error: workoutPlanError,
     } = await supabase
       .from('workout_plans')
       .select('*')
@@ -303,10 +325,10 @@ export async function POST(
       )
       .maybeSingle();
 
-    if (workoutError) {
+    if (workoutPlanError) {
       console.error(
         'Workout plan error:',
-        workoutError
+        workoutPlanError
       );
 
       return NextResponse.json(
@@ -333,12 +355,12 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 6. Fetch Active Diet Plan
+    // Active diet
     // --------------------------------------------------------
 
     const {
       data: dietPlan,
-      error: dietError,
+      error: dietPlanError,
     } = await supabase
       .from('diet_plans')
       .select('*')
@@ -352,10 +374,10 @@ export async function POST(
       )
       .maybeSingle();
 
-    if (dietError) {
+    if (dietPlanError) {
       console.error(
         'Diet plan error:',
-        dietError
+        dietPlanError
       );
 
       return NextResponse.json(
@@ -382,14 +404,14 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 7. Current Week
+    // Current week
     // --------------------------------------------------------
 
     const currentWeek =
       workoutPlan.week_number;
 
     // --------------------------------------------------------
-    // 8. Count Completed Activities
+    // Activity counts
     // --------------------------------------------------------
 
     const {
@@ -402,7 +424,7 @@ export async function POST(
       );
 
     // --------------------------------------------------------
-    // 9. Build AI Prompt
+    // Gemini prompt
     // --------------------------------------------------------
 
     const prompt =
@@ -413,54 +435,50 @@ export async function POST(
         currentWeek,
         workouts_completed,
         diet_completed,
-        feedback: {
-          weight_kg:
-            checkinData.weight_kg,
-          workout_difficulty:
-            checkinData.workout_difficulty,
-          energy_rating:
-            checkinData.energy_rating,
-          user_notes:
-            checkinData.user_notes,
-        },
+        feedback: checkin,
       });
 
     // --------------------------------------------------------
-    // 10. Gemini
+    // Gemini
     // --------------------------------------------------------
 
-    const geminiResponse =
+    const result =
       await model.generateContent(
         prompt
       );
 
     const responseText =
-      geminiResponse.response.text();
+      result.response.text();
 
     // --------------------------------------------------------
-    // 11. Parse AI JSON
+    // Parse AI JSON
     // --------------------------------------------------------
 
     let aiOutput: any;
 
     try {
-      const jsonMatch =
+      const fenced =
         responseText.match(
-          /```json\s*([\s\S]*?)\s*```/
-        ) ||
+          /```json\s*([\s\S]*?)\s*```/i
+        );
+
+      const object =
         responseText.match(
           /(\{[\s\S]*\})/
         );
 
       const jsonString =
-        jsonMatch?.[1] ??
+        fenced?.[1] ??
+        object?.[1] ??
         responseText;
 
       aiOutput =
-        JSON.parse(jsonString);
+        JSON.parse(
+          jsonString.trim()
+        );
     } catch (error) {
       console.error(
-        'Gemini JSON parse error:',
+        'Gemini response:',
         responseText
       );
 
@@ -476,24 +494,21 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 12. Validate AI Output
+    // Validate AI output
     // --------------------------------------------------------
 
     if (
       !aiOutput ||
-      !aiOutput.ai_analysis ||
+      typeof aiOutput !== 'object' ||
+      typeof aiOutput.ai_analysis !==
+        'string' ||
       !aiOutput.workout ||
       !aiOutput.diet
     ) {
-      console.error(
-        'Invalid AI output:',
-        aiOutput
-      );
-
       return NextResponse.json(
         {
           error:
-            'AI response missing required fields',
+            'AI response is missing required fields',
         },
         {
           status: 502,
@@ -502,61 +517,54 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 13. Generate Next Week
-    // --------------------------------------------------------
-
-    const newWeek =
-      currentWeek + 1;
-
-    // --------------------------------------------------------
-    // 14. Database Transaction
+    // Save everything through RPC
     // --------------------------------------------------------
 
     const {
       data: transactionResult,
       error: transactionError,
-    } = await supabase.rpc(
-      'generate_new_week_plans',
-      {
-        p_user_id:
-          profile.id,
+    } =
+      await supabase.rpc(
+        'generate_new_week_plans',
+        {
+          p_user_id:
+            profile.id,
 
-        p_week_number:
-          currentWeek,
+          p_week_number:
+            currentWeek,
 
-        p_weight_kg:
-          checkinData.weight_kg,
+          p_weight_kg:
+            checkin.weight_kg,
 
-        p_workout_difficulty:
-          checkinData.workout_difficulty,
+          p_workout_difficulty:
+            checkin.workout_difficulty,
 
-        p_energy_rating:
-          checkinData.energy_rating,
+          p_energy_rating:
+            checkin.energy_rating,
 
-        p_workouts_completed:
-          workouts_completed,
+          p_workouts_completed:
+            workouts_completed,
 
-        p_diet_completed:
-          diet_completed,
+          p_diet_completed:
+            diet_completed,
 
-        p_user_notes:
-          checkinData.user_notes ||
-          '',
+          p_user_notes:
+            checkin.user_notes ?? '',
 
-        p_ai_analysis:
-          aiOutput.ai_analysis,
+          p_ai_analysis:
+            aiOutput.ai_analysis,
 
-        p_new_workout:
-          aiOutput.workout,
+          p_new_workout:
+            aiOutput.workout,
 
-        p_new_diet:
-          aiOutput.diet,
-      }
-    );
+          p_new_diet:
+            aiOutput.diet,
+        }
+      );
 
     if (transactionError) {
       console.error(
-        'Transaction error:',
+        'RPC error:',
         transactionError
       );
 
@@ -564,6 +572,8 @@ export async function POST(
         {
           error:
             'Database transaction failed',
+          details:
+            transactionError.message,
         },
         {
           status: 500,
@@ -571,13 +581,10 @@ export async function POST(
       );
     }
 
-    // --------------------------------------------------------
-    // 15. Success
-    // --------------------------------------------------------
-
     return NextResponse.json({
       success: true,
-      week_number: newWeek,
+      week_number:
+        currentWeek + 1,
       ai_analysis:
         aiOutput.ai_analysis,
       workout:
@@ -587,7 +594,6 @@ export async function POST(
       transaction_result:
         transactionResult,
     });
-
   } catch (error: any) {
     console.error(
       'Weekly check-in error:',
@@ -611,118 +617,76 @@ export async function POST(
 // Gemini Prompt
 // ============================================================
 
-function buildGeminiPrompt(params: {
+function buildGeminiPrompt({
+  profile,
+  workoutPlan,
+  dietPlan,
+  currentWeek,
+  workouts_completed,
+  diet_completed,
+  feedback,
+}: {
   profile: any;
   workoutPlan: any;
   dietPlan: any;
   currentWeek: number;
   workouts_completed: number;
   diet_completed: number;
-  feedback: {
-    weight_kg: number;
-    workout_difficulty: string;
-    energy_rating: number;
-    user_notes?: string;
-  };
+  feedback: CheckinRequest;
 }) {
-  const {
-    profile,
-    workoutPlan,
-    dietPlan,
-    currentWeek,
-    workouts_completed,
-    diet_completed,
-    feedback,
-  } = params;
-
-  const {
-    age,
-    height_cm,
-    initial_weight_kg,
-    goal,
-    equipment,
-    diet_preference,
-    budget,
-  } = profile;
-
-  const previousWorkout =
-    workoutPlan.plan_data;
-
-  const previousDiet =
-    dietPlan.plan_data;
-
-  const totalDays = 7;
-
-  const workoutAdherence =
-    `${workouts_completed}/${totalDays}`;
-
-  const dietAdherence =
-    `${diet_completed}/${totalDays}`;
-
   return `
 You are an expert fitness and nutrition coach.
 
 Generate a personalized plan for Week ${
     currentWeek + 1
-  } based on the user's baseline, previous plan, adherence and feedback.
+  }.
 
 USER BASELINE:
-- Age: ${age}
-- Height: ${height_cm} cm
-- Initial Weight: ${initial_weight_kg} kg
-- Goal: ${goal}
-- Available Equipment: ${equipment}
-- Diet Preference: ${diet_preference}
-- Budget: ${budget}
+${JSON.stringify(
+  profile,
+  null,
+  2
+)}
 
 PREVIOUS WORKOUT PLAN:
 ${JSON.stringify(
-  previousWorkout,
+  workoutPlan.plan_data,
   null,
   2
 )}
 
 PREVIOUS DIET PLAN:
 ${JSON.stringify(
-  previousDiet,
+  dietPlan.plan_data,
   null,
   2
 )}
 
-ACTUAL EXECUTION:
-- Workouts completed: ${workoutAdherence}
-- Diet days completed: ${dietAdherence}
+ADHERENCE:
+- Workout days completed: ${workouts_completed}/7
+- Diet days completed: ${diet_completed}/7
 
-USER FEEDBACK:
-- Current Weight: ${feedback.weight_kg} kg
-- Workout Difficulty: ${feedback.workout_difficulty}
+WEEKLY FEEDBACK:
+- Weight: ${feedback.weight_kg} kg
+- Workout difficulty: ${feedback.workout_difficulty}
 - Energy: ${feedback.energy_rating}/5
 - Notes: ${
     feedback.user_notes ||
     'None'
   }
 
-COACHING RULES:
-
+RULES:
 - Consider adherence before making major changes.
-- If workout is Too Easy, apply progressive overload.
-- If workout is Too Hard or energy is below 3, reduce volume or intensity.
-- Make reasonable nutrition adjustments.
-- Do not make extreme calorie changes.
-- Respect available equipment and budget.
-- Keep the plan practical and sustainable.
-- Do not recommend unsafe practices.
-
-OUTPUT:
+- If training is Too Easy, use progressive overload.
+- If training is Too Hard or energy is below 3, reduce volume/intensity.
+- Keep nutrition practical and reasonable.
+- Respect the user's equipment, budget and preferences.
+- Do not make extreme or unsafe recommendations.
 
 Return ONLY valid JSON.
 
-No markdown.
-No code fences.
-No text outside JSON.
-
 {
-  "ai_analysis": "3-4 sentence analysis.",
+  "ai_analysis": "3-4 sentence weekly analysis.",
   "workout": {
     "Monday": {
       "focus": "",
