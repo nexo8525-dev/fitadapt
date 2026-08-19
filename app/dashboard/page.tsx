@@ -1,17 +1,9 @@
+// app/dashboard/page.tsx
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
 import { useUser } from '@clerk/nextjs';
-import { supabase } from '@/lib/supabase/client'; // adjust to your supabase client
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog'; // if using shadcn, or custom modal
-
-// If no shadcn, we'll build a simple modal using divs
+import { supabase } from '@/lib/supabase'; // adjust path if needed
 
 // ============================================================
 // Types
@@ -26,7 +18,7 @@ interface WorkoutPlan {
   id: string;
   user_id: string;
   week_number: number;
-  plan_data: any; // JSON
+  plan_data: any;
   is_active: boolean;
 }
 
@@ -96,7 +88,7 @@ export default function DashboardPage() {
         .eq('user_id', profileData.id)
         .eq('is_active', true)
         .single();
-      if (wpErr && wpErr.code !== 'PGRST116') throw wpErr; // ignore not found
+      if (wpErr && wpErr.code !== 'PGRST116') throw wpErr;
       setActiveWorkout(workout || null);
 
       // 3. Get active diet plan
@@ -181,7 +173,7 @@ export default function DashboardPage() {
 
       // Success: close modal and refresh data
       setModalOpen(false);
-      await fetchData(); // re-fetch to show new week
+      await fetchData();
     } catch (err: any) {
       setSubmitError(err.message || 'Something went wrong');
     } finally {
@@ -205,12 +197,7 @@ export default function DashboardPage() {
     );
   }
 
-  // Determine current week
   const currentWeek = activeWorkout?.week_number ?? 0;
-
-  // Check if we have a latest AI analysis (from previous check-in)
-  const hasAiAnalysis = latestCheckin?.ai_analysis && latestCheckin?.week_number === currentWeek - 1;
-  // Show only if it's for the previous week (or if currentWeek is 0? We'll show if exists)
   const showInsight = latestCheckin?.ai_analysis && currentWeek > 0;
 
   return (
@@ -249,7 +236,6 @@ export default function DashboardPage() {
 
       {/* Dashboard content (existing cards for workout & diet plans would go here) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        {/* Workout Plan Card - placeholder */}
         <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
           <h2 className="text-xl font-semibold text-indigo-300">Workout Plan</h2>
           <div className="mt-4 text-slate-400">
@@ -260,7 +246,6 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
-        {/* Diet Plan Card */}
         <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
           <h2 className="text-xl font-semibold text-emerald-300">Diet Plan</h2>
           <div className="mt-4 text-slate-400">
@@ -283,126 +268,124 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      {/* Modal */}
-      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-        <DialogContent className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-0 overflow-hidden shadow-2xl">
-          <DialogHeader className="p-6 pb-2">
-            <DialogTitle className="text-2xl font-bold text-white">
-              Weekly Check-In
-            </DialogTitle>
-            <p className="text-sm text-slate-400">
+      {/* Custom Modal */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl mx-4">
+            <h2 className="text-2xl font-bold text-white mb-1">Weekly Check-In</h2>
+            <p className="text-sm text-slate-400 mb-4">
               How did this week go? Let's review your progress.
             </p>
-          </DialogHeader>
 
-          <form onSubmit={handleSubmit} className="p-6 pt-3 space-y-5">
-            {/* Weight */}
-            <div>
-              <label className="block text-sm font-medium text-slate-300">
-                Current Weight (kg)
-              </label>
-              <input
-                type="number"
-                name="weight_kg"
-                value={formData.weight_kg}
-                onChange={handleFormChange}
-                step="0.1"
-                min="0"
-                required
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                placeholder="e.g. 72.5"
-              />
-            </div>
-
-            {/* Workout Difficulty */}
-            <div>
-              <label className="block text-sm font-medium text-slate-300">
-                Workout Difficulty
-              </label>
-              <select
-                name="workout_difficulty"
-                value={formData.workout_difficulty}
-                onChange={handleFormChange}
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              >
-                <option value="Too Easy">Too Easy</option>
-                <option value="Just Right">Just Right</option>
-                <option value="Too Hard">Too Hard</option>
-              </select>
-            </div>
-
-            {/* Energy Rating */}
-            <div>
-              <label className="block text-sm font-medium text-slate-300">
-                Energy Level (1–5)
-              </label>
-              <div className="mt-1 flex items-center gap-2">
-                {[1, 2, 3, 4, 5].map((num) => (
-                  <button
-                    key={num}
-                    type="button"
-                    onClick={() => handleEnergyChange(num)}
-                    className={`h-10 w-10 rounded-full text-sm font-semibold transition ${
-                      formData.energy_rating === num
-                        ? 'bg-indigo-600 text-white ring-2 ring-indigo-400 ring-offset-2 ring-offset-slate-900'
-                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                    }`}
-                  >
-                    {num}
-                  </button>
-                ))}
+            <form onSubmit={handleSubmit} className="space-y-5">
+              {/* Weight */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300">
+                  Current Weight (kg)
+                </label>
+                <input
+                  type="number"
+                  name="weight_kg"
+                  value={formData.weight_kg}
+                  onChange={handleFormChange}
+                  step="0.1"
+                  min="0"
+                  required
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  placeholder="e.g. 72.5"
+                />
               </div>
-            </div>
 
-            {/* Notes */}
-            <div>
-              <label className="block text-sm font-medium text-slate-300">
-                Feedback / Notes
-              </label>
-              <textarea
-                name="user_notes"
-                value={formData.user_notes}
-                onChange={handleFormChange}
-                rows={3}
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                placeholder="How did this week feel? Any injuries or cravings?"
-              />
-            </div>
-
-            {submitError && (
-              <div className="text-sm text-red-400 bg-red-950/30 p-3 rounded-lg border border-red-800/50">
-                {submitError}
+              {/* Workout Difficulty */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300">
+                  Workout Difficulty
+                </label>
+                <select
+                  name="workout_difficulty"
+                  value={formData.workout_difficulty}
+                  onChange={handleFormChange}
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value="Too Easy">Too Easy</option>
+                  <option value="Just Right">Just Right</option>
+                  <option value="Too Hard">Too Hard</option>
+                </select>
               </div>
-            )}
 
-            {/* Actions */}
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setModalOpen(false)}
-                className="rounded-lg border border-slate-700 px-5 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800"
-                disabled={submitting}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-medium text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {submitting ? (
-                  <>
-                    <span className="animate-spin">⚡</span>
-                    AI Coach is analyzing...
-                  </>
-                ) : (
-                  'Submit Review'
-                )}
-              </button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+              {/* Energy Rating */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300">
+                  Energy Level (1–5)
+                </label>
+                <div className="mt-1 flex items-center gap-2">
+                  {[1, 2, 3, 4, 5].map((num) => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => handleEnergyChange(num)}
+                      className={`h-10 w-10 rounded-full text-sm font-semibold transition ${
+                        formData.energy_rating === num
+                          ? 'bg-indigo-600 text-white ring-2 ring-indigo-400 ring-offset-2 ring-offset-slate-900'
+                          : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                      }`}
+                    >
+                      {num}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300">
+                  Feedback / Notes
+                </label>
+                <textarea
+                  name="user_notes"
+                  value={formData.user_notes}
+                  onChange={handleFormChange}
+                  rows={3}
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  placeholder="How did this week feel? Any injuries or cravings?"
+                />
+              </div>
+
+              {submitError && (
+                <div className="text-sm text-red-400 bg-red-950/30 p-3 rounded-lg border border-red-800/50">
+                  {submitError}
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setModalOpen(false)}
+                  className="rounded-lg border border-slate-700 px-5 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800"
+                  disabled={submitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-medium text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {submitting ? (
+                    <>
+                      <span className="animate-spin">⚡</span>
+                      AI Coach is analyzing...
+                    </>
+                  ) : (
+                    'Submit Review'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
-    }
+}
