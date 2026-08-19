@@ -1,998 +1,408 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuth, useUser, useClerk } from '@clerk/nextjs';
-import { createSupabaseClient } from '@/lib/supabase';
+import { useEffect, useState, useCallback } from 'react';
+import { useUser } from '@clerk/nextjs';
+import { supabase } from '@/lib/supabase/client'; // adjust to your supabase client
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'; // if using shadcn, or custom modal
 
-type Exercise = {
-  name?: string;
-  sets?: number | string;
-  reps?: number | string;
-  rest_seconds?: number | string;
-  notes?: string;
-};
+// If no shadcn, we'll build a simple modal using divs
 
-type WorkoutDay = {
-  focus?: string;
-  duration_minutes?: number | string;
-  exercises?: Exercise[];
-};
+// ============================================================
+// Types
+// ============================================================
+interface Profile {
+  id: string;
+  clerk_user_id: string;
+  initial_weight_kg: number;
+}
 
-type Meal = {
-  meal?: string;
-  items?: string[];
-  approx_calories?: number | string;
-  approx_protein_g?: number | string;
-};
-
-type DietDay = {
-  breakfast?: Meal;
-  lunch?: Meal;
-  dinner?: Meal;
-  snacks?: Meal[];
-  daily_total_calories?: number | string;
-  daily_total_protein_g?: number | string;
-};
-
-type PlanRow = {
+interface WorkoutPlan {
   id: string;
   user_id: string;
-  plan_data: any;
   week_number: number;
-  is_active?: boolean;
-};
-
-const DAYS = [
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-  'Sunday',
-];
-
-function normalizePlanData(data: any) {
-  if (!data) return {};
-
-  if (typeof data === 'object') return data;
-
-  if (typeof data === 'string') {
-    try {
-      return JSON.parse(data);
-    } catch {
-      return {};
-    }
-  }
-
-  return {};
+  plan_data: any; // JSON
+  is_active: boolean;
 }
 
-function MealCard({
-  title,
-  meal,
-}: {
-  title: string;
-  meal?: Meal;
-}) {
-  if (!meal) return null;
-
-  return (
-    <div className="rounded-2xl bg-slate-800 border border-slate-700 p-4">
-      <h4 className="text-lg font-bold text-white mb-2">
-        {title}
-      </h4>
-
-      {meal.meal && (
-        <p className="text-indigo-300 font-semibold mb-3">
-          {meal.meal}
-        </p>
-      )}
-
-      {Array.isArray(meal.items) && meal.items.length > 0 && (
-        <ul className="space-y-1.5 mb-4">
-          {meal.items.map((item, index) => (
-            <li
-              key={index}
-              className="text-slate-300 text-sm flex gap-2"
-            >
-              <span>•</span>
-              <span>{item}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="flex flex-wrap gap-2">
-        {meal.approx_calories !== undefined && (
-          <span className="text-xs bg-slate-700 text-slate-200 rounded-lg px-2.5 py-1.5">
-            🔥 {meal.approx_calories} kcal
-          </span>
-        )}
-
-        {meal.approx_protein_g !== undefined && (
-          <span className="text-xs bg-slate-700 text-slate-200 rounded-lg px-2.5 py-1.5">
-            💪 {meal.approx_protein_g}g protein
-          </span>
-        )}
-      </div>
-    </div>
-  );
+interface DietPlan {
+  id: string;
+  user_id: string;
+  week_number: number;
+  plan_data: any;
+  is_active: boolean;
 }
 
-function WorkoutDayCard({
-  day,
-  data,
-  completed,
-  loading,
-  onToggleComplete,
-}: {
-  day: string;
-  data: WorkoutDay;
-  completed: boolean;
-  loading: boolean;
-  onToggleComplete: () => void;
-}) {
-  const exercises = Array.isArray(data?.exercises)
-    ? data.exercises
-    : [];
-
-  return (
-    <div className="rounded-2xl bg-slate-800 border border-slate-700 p-4">
-      <div className="flex items-start justify-between gap-3 mb-4">
-        <div>
-          <h3 className="text-xl font-bold text-white">
-            {day}
-          </h3>
-
-          {data?.focus && (
-            <p className="text-indigo-300 font-semibold mt-1">
-              {data.focus}
-            </p>
-          )}
-        </div>
-
-        {data?.duration_minutes !== undefined && (
-          <span className="shrink-0 text-xs bg-slate-700 text-slate-200 rounded-lg px-2.5 py-1.5">
-            ⏱️ {data.duration_minutes} min
-          </span>
-        )}
-      </div>
-
-      {exercises.length === 0 ? (
-        <div className="rounded-xl bg-slate-900 p-4 text-slate-400 text-sm mb-4">
-          Recovery / Rest day
-        </div>
-      ) : (
-        <div className="space-y-3 mb-4">
-          {exercises.map((exercise, index) => (
-            <div
-              key={index}
-              className="rounded-xl bg-slate-900 border border-slate-700 p-3"
-            >
-              <h4 className="font-bold text-white">
-                {index + 1}. {exercise?.name || 'Exercise'}
-              </h4>
-
-              <div className="flex flex-wrap gap-2 mt-2">
-                {exercise?.sets !== undefined && (
-                  <span className="text-xs bg-slate-700 text-slate-300 rounded-lg px-2 py-1">
-                    Sets: {exercise.sets}
-                  </span>
-                )}
-
-                {exercise?.reps !== undefined && (
-                  <span className="text-xs bg-slate-700 text-slate-300 rounded-lg px-2 py-1">
-                    Reps: {exercise.reps}
-                  </span>
-                )}
-
-                {exercise?.rest_seconds !== undefined && (
-                  <span className="text-xs bg-slate-700 text-slate-300 rounded-lg px-2 py-1">
-                    Rest: {exercise.rest_seconds}s
-                  </span>
-                )}
-              </div>
-
-              {exercise?.notes && (
-                <p className="text-sm text-slate-400 mt-2">
-                  {exercise.notes}
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      <button
-        type="button"
-        onClick={onToggleComplete}
-        disabled={loading}
-        className={`w-full rounded-xl px-4 py-3 font-semibold transition ${
-          completed
-            ? 'bg-green-600 hover:bg-green-700'
-            : 'bg-indigo-600 hover:bg-indigo-700'
-        } text-white disabled:bg-slate-700 disabled:cursor-not-allowed`}
-      >
-        {loading
-          ? 'Saving...'
-          : completed
-          ? '✓ Workout Completed'
-          : 'Mark Workout Complete'}
-      </button>
-    </div>
-  );
+interface WeeklyCheckin {
+  id: string;
+  user_id: string;
+  week_number: number;
+  weight_kg: number;
+  workout_difficulty: string;
+  energy_rating: number;
+  workouts_completed_count: number;
+  diet_completed_count: number;
+  user_notes: string | null;
+  ai_analysis: string | null;
+  created_at: string;
 }
 
-function WorkoutSection({
-  workout,
-  activity,
-  activityLoading,
-  onToggleComplete,
-}: {
-  workout: PlanRow;
-  activity: Record<string, boolean>;
-  activityLoading: Record<string, boolean>;
-  onToggleComplete: (day: string) => void;
-}) {
-  const data = normalizePlanData(workout.plan_data);
-
-  return (
-    <section className="bg-slate-900 border border-slate-700 rounded-2xl p-4 sm:p-6 mb-6">
-      <div className="mb-6">
-        <h2 className="text-2xl sm:text-3xl font-bold text-white">
-          🏋️ Workout - Week {workout.week_number}
-        </h2>
-
-        <p className="text-slate-400 mt-1">
-          Your personalized 7-day workout plan
-        </p>
-      </div>
-
-      <div className="space-y-4">
-        {DAYS.map((day) => (
-          <WorkoutDayCard
-            key={day}
-            day={day}
-            data={data?.[day] || {}}
-            completed={Boolean(activity[day])}
-            loading={Boolean(activityLoading[day])}
-            onToggleComplete={() => onToggleComplete(day)}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function DietDayCard({
-  day,
-  data,
-  completed,
-  loading,
-  onToggleComplete,
-}: {
-  day: string;
-  data: DietDay;
-  completed: boolean;
-  loading: boolean;
-  onToggleComplete: () => void;
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-700 bg-slate-950 p-4">
-      <div className="flex items-center justify-between gap-3 mb-4">
-        <h3 className="text-xl font-bold text-white">
-          {day}
-        </h3>
-
-        <div className="flex flex-wrap gap-2 justify-end">
-          {data.daily_total_calories !== undefined && (
-            <span className="text-xs bg-slate-800 text-slate-300 rounded-lg px-2.5 py-1.5">
-              🔥 {data.daily_total_calories} kcal
-            </span>
-          )}
-
-          {data.daily_total_protein_g !== undefined && (
-            <span className="text-xs bg-slate-800 text-slate-300 rounded-lg px-2.5 py-1.5">
-              💪 {data.daily_total_protein_g}g protein
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <MealCard title="🌅 Breakfast" meal={data.breakfast} />
-        <MealCard title="☀️ Lunch" meal={data.lunch} />
-        <MealCard title="🌙 Dinner" meal={data.dinner} />
-      </div>
-
-      {Array.isArray(data.snacks) && data.snacks.length > 0 && (
-        <div className="mt-3">
-          <h4 className="text-white font-bold mb-2">
-            🍎 Snacks
-          </h4>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {data.snacks.map((snack, index) => (
-              <MealCard
-                key={index}
-                title={`Snack ${index + 1}`}
-                meal={snack}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      <button
-        type="button"
-        onClick={onToggleComplete}
-        disabled={loading}
-        className={`w-full mt-4 rounded-xl px-4 py-3 font-semibold transition ${
-          completed
-            ? 'bg-green-600 hover:bg-green-700'
-            : 'bg-indigo-600 hover:bg-indigo-700'
-        } text-white disabled:bg-slate-700 disabled:cursor-not-allowed`}
-      >
-        {loading
-          ? 'Saving...'
-          : completed
-          ? '✓ Diet Day Completed'
-          : 'Mark Diet Day Complete'}
-      </button>
-    </div>
-  );
-}
-
-function DietSection({
-  diet,
-  activity,
-  activityLoading,
-  onToggleComplete,
-}: {
-  diet: PlanRow;
-  activity: Record<string, boolean>;
-  activityLoading: Record<string, boolean>;
-  onToggleComplete: (day: string) => void;
-}) {
-  const data = normalizePlanData(diet.plan_data);
-
-  return (
-    <section className="bg-slate-900 border border-slate-700 rounded-2xl p-4 sm:p-6 mb-6">
-      <div className="mb-6">
-        <h2 className="text-2xl sm:text-3xl font-bold text-white">
-          🥗 Diet - Week {diet.week_number}
-        </h2>
-
-        <p className="text-slate-400 mt-1">
-          Your personalized 7-day diet plan
-        </p>
-      </div>
-
-      <div className="space-y-6">
-        {DAYS.map((day) => (
-          <DietDayCard
-            key={day}
-            day={day}
-            data={data?.[day] || {}}
-            completed={Boolean(activity[day])}
-            loading={Boolean(activityLoading[day])}
-            onToggleComplete={() => onToggleComplete(day)}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
+// ============================================================
+// Main Component
+// ============================================================
 export default function DashboardPage() {
-  const router = useRouter();
-  const { isLoaded, isSignedIn, user } = useUser();
-  const { getToken } = useAuth();
-  const { signOut } = useClerk();
-
-  const userId = user?.id ?? null;
-
-  const supabase = useMemo(() => {
-    return createSupabaseClient(async () => {
-      return await getToken({
-        template: 'supabase',
-      });
-    });
-  }, [getToken]);
-
-  const [profile, setProfile] = useState<any>(null);
-  const [workout, setWorkout] = useState<PlanRow | null>(null);
-  const [diet, setDiet] = useState<PlanRow | null>(null);
-
-  const [workoutActivity, setWorkoutActivity] =
-    useState<Record<string, boolean>>({});
-
-  const [dietActivity, setDietActivity] =
-    useState<Record<string, boolean>>({});
-
-  const [workoutActivityLoading, setWorkoutActivityLoading] =
-    useState<Record<string, boolean>>({});
-
-  const [dietActivityLoading, setDietActivityLoading] =
-    useState<Record<string, boolean>>({});
-
+  const { user, isLoaded: isUserLoaded } = useUser();
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [activeWorkout, setActiveWorkout] = useState<WorkoutPlan | null>(null);
+  const [activeDiet, setActiveDiet] = useState<DietPlan | null>(null);
+  const [latestCheckin, setLatestCheckin] = useState<WeeklyCheckin | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+
+  // Modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [formData, setFormData] = useState({
+    weight_kg: '',
+    workout_difficulty: 'Just Right' as 'Too Easy' | 'Just Right' | 'Too Hard',
+    energy_rating: 3,
+    user_notes: '',
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+
+  // Fetch all data
+  const fetchData = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+
+    try {
+      // 1. Get profile
+      const { data: profileData, error: profileErr } = await supabase
+        .from('profiles')
+        .select('id, clerk_user_id, initial_weight_kg')
+        .eq('clerk_user_id', user.id)
+        .single();
+      if (profileErr) throw profileErr;
+      setProfile(profileData);
+
+      // 2. Get active workout plan
+      const { data: workout, error: wpErr } = await supabase
+        .from('workout_plans')
+        .select('*')
+        .eq('user_id', profileData.id)
+        .eq('is_active', true)
+        .single();
+      if (wpErr && wpErr.code !== 'PGRST116') throw wpErr; // ignore not found
+      setActiveWorkout(workout || null);
+
+      // 3. Get active diet plan
+      const { data: diet, error: dpErr } = await supabase
+        .from('diet_plans')
+        .select('*')
+        .eq('user_id', profileData.id)
+        .eq('is_active', true)
+        .single();
+      if (dpErr && dpErr.code !== 'PGRST116') throw dpErr;
+      setActiveDiet(diet || null);
+
+      // 4. Get latest weekly check-in
+      const { data: checkin, error: ciErr } = await supabase
+        .from('weekly_checkins')
+        .select('*')
+        .eq('user_id', profileData.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (ciErr && ciErr.code !== 'PGRST116') throw ciErr;
+      setLatestCheckin(checkin || null);
+
+      // Pre-fill weight if checkin exists
+      if (checkin) {
+        setFormData((prev) => ({
+          ...prev,
+          weight_kg: String(checkin.weight_kg),
+        }));
+      } else if (profileData.initial_weight_kg) {
+        setFormData((prev) => ({
+          ...prev,
+          weight_kg: String(profileData.initial_weight_kg),
+        }));
+      }
+    } catch (err) {
+      console.error('Error fetching dashboard data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
 
   useEffect(() => {
-    if (!isLoaded) return;
-
-    if (!isSignedIn || !userId) {
-      router.replace('/login');
-      return;
+    if (isUserLoaded && user) {
+      fetchData();
     }
+  }, [isUserLoaded, user, fetchData]);
 
-    let cancelled = false;
+  // Handle form changes
+  const handleFormChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
 
-    async function loadDashboard() {
-      setLoading(true);
-      setErrorMessage('');
+  const handleEnergyChange = (value: number) => {
+    setFormData((prev) => ({ ...prev, energy_rating: value }));
+  };
 
-      try {
-        console.log('Dashboard: loading profile for', userId);
-
-        const {
-          data: profileData,
-          error: profileError,
-        } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('clerk_user_id', userId)
-          .maybeSingle();
-
-        if (profileError) {
-          throw new Error(
-            `Profile fetch failed: ${profileError.message}`
-          );
-        }
-
-        if (!profileData) {
-          console.log(
-            'Dashboard: profile not found, sending to onboarding'
-          );
-
-          if (!cancelled) {
-            router.replace('/onboarding');
-          }
-
-          return;
-        }
-
-        if (cancelled) return;
-
-        console.log('Dashboard: profile loaded');
-
-        setProfile(profileData);
-
-        const {
-          data: workoutData,
-          error: workoutError,
-        } = await supabase
-          .from('workout_plans')
-          .select('*')
-          .eq('user_id', profileData.id)
-          .eq('is_active', true)
-          .order('created_at', {
-            ascending: false,
-          })
-          .limit(1)
-          .maybeSingle();
-
-        if (workoutError) {
-          console.error(
-            'Workout fetch error:',
-            workoutError
-          );
-        }
-
-        const {
-          data: dietData,
-          error: dietError,
-        } = await supabase
-          .from('diet_plans')
-          .select('*')
-          .eq('user_id', profileData.id)
-          .eq('is_active', true)
-          .order('created_at', {
-            ascending: false,
-          })
-          .limit(1)
-          .maybeSingle();
-
-        if (dietError) {
-          console.error(
-            'Diet fetch error:',
-            dietError
-          );
-        }
-
-        if (cancelled) return;
-
-        setWorkout(workoutData);
-        setDiet(dietData);
-
-        if (workoutData) {
-          const {
-            data: activityData,
-            error: activityError,
-          } = await supabase
-            .from('workout_activity')
-            .select('*')
-            .eq('user_id', profileData.id)
-            .eq('workout_plan_id', workoutData.id)
-            .eq('week_number', workoutData.week_number);
-
-          if (activityError) {
-            console.error(
-              'Workout activity fetch error:',
-              activityError
-            );
-          } else {
-            const activityMap: Record<string, boolean> = {};
-
-            (activityData || []).forEach((row: any) => {
-              if (row.day) {
-                activityMap[row.day] = Boolean(row.completed);
-              }
-            });
-
-            setWorkoutActivity(activityMap);
-          }
-        }
-
-        if (dietData) {
-          const {
-            data: activityData,
-            error: activityError,
-          } = await supabase
-            .from('diet_activity')
-            .select('*')
-            .eq('user_id', profileData.id)
-            .eq('diet_plan_id', dietData.id)
-            .eq('week_number', dietData.week_number);
-
-          if (activityError) {
-            console.error(
-              'Diet activity fetch error:',
-              activityError
-            );
-          } else {
-            const activityMap: Record<string, boolean> = {};
-
-            (activityData || []).forEach((row: any) => {
-              if (row.day) {
-                activityMap[row.day] = Boolean(row.completed);
-              }
-            });
-
-            setDietActivity(activityMap);
-          }
-        }
-
-        console.log('Dashboard: finished loading');
-      } catch (error) {
-        console.error('Dashboard loading error:', error);
-
-        if (!cancelled) {
-          setErrorMessage(
-            error instanceof Error
-              ? error.message
-              : 'Failed to load dashboard.'
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadDashboard();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    isLoaded,
-    isSignedIn,
-    userId,
-    router,
-    supabase,
-  ]);
-
-  async function toggleWorkoutComplete(day: string) {
-    if (!profile || !workout) return;
-    if (workoutActivityLoading[day]) return;
-
-    setWorkoutActivityLoading((prev) => ({
-      ...prev,
-      [day]: true,
-    }));
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setSubmitError('');
 
     try {
-      const currentCompleted = Boolean(
-        workoutActivity[day]
-      );
+      const payload = {
+        weight_kg: parseFloat(formData.weight_kg),
+        workout_difficulty: formData.workout_difficulty,
+        energy_rating: formData.energy_rating,
+        user_notes: formData.user_notes,
+      };
 
-      const { data: existing, error: findError } =
-        await supabase
-          .from('workout_activity')
-          .select('id')
-          .eq('user_id', profile.id)
-          .eq('workout_plan_id', workout.id)
-          .eq('week_number', workout.week_number)
-          .eq('day', day)
-          .maybeSingle();
-
-      if (findError) {
-        throw new Error(
-          `Workout activity lookup failed: ${findError.message}`
-        );
-      }
-
-      const newCompleted = !currentCompleted;
-
-      if (existing) {
-        const { error } = await supabase
-          .from('workout_activity')
-          .update({
-            completed: newCompleted,
-            completed_at: newCompleted
-              ? new Date().toISOString()
-              : null,
-          })
-          .eq('id', existing.id);
-
-        if (error) {
-          throw new Error(
-            `Workout activity update failed: ${error.message}`
-          );
-        }
-      } else {
-        const { error } = await supabase
-          .from('workout_activity')
-          .insert({
-            user_id: profile.id,
-            workout_plan_id: workout.id,
-            week_number: workout.week_number,
-            day,
-            completed: newCompleted,
-            completed_at: newCompleted
-              ? new Date().toISOString()
-              : null,
-          });
-
-        if (error) {
-          throw new Error(
-            `Workout activity insert failed: ${error.message}`
-          );
-        }
-      }
-
-      setWorkoutActivity((prev) => ({
-        ...prev,
-        [day]: newCompleted,
-      }));
-    } catch (error) {
-      console.error('Workout activity error:', error);
-
-      alert(
-        error instanceof Error
-          ? error.message
-          : 'Failed to update workout activity.'
-      );
-    } finally {
-      setWorkoutActivityLoading((prev) => ({
-        ...prev,
-        [day]: false,
-      }));
-    }
-  }
-
-  async function toggleDietComplete(day: string) {
-    if (!profile || !diet) return;
-    if (dietActivityLoading[day]) return;
-
-    setDietActivityLoading((prev) => ({
-      ...prev,
-      [day]: true,
-    }));
-
-    try {
-      const currentCompleted = Boolean(
-        dietActivity[day]
-      );
-
-      const { data: existing, error: findError } =
-        await supabase
-          .from('diet_activity')
-          .select('id')
-          .eq('user_id', profile.id)
-          .eq('diet_plan_id', diet.id)
-          .eq('week_number', diet.week_number)
-          .eq('day', day)
-          .maybeSingle();
-
-      if (findError) {
-        throw new Error(
-          `Diet activity lookup failed: ${findError.message}`
-        );
-      }
-
-      const newCompleted = !currentCompleted;
-
-      if (existing) {
-        const { error } = await supabase
-          .from('diet_activity')
-          .update({
-            completed: newCompleted,
-            completed_at: newCompleted
-              ? new Date().toISOString()
-              : null,
-          })
-          .eq('id', existing.id);
-
-        if (error) {
-          throw new Error(
-            `Diet activity update failed: ${error.message}`
-          );
-        }
-      } else {
-        const { error } = await supabase
-          .from('diet_activity')
-          .insert({
-            user_id: profile.id,
-            diet_plan_id: diet.id,
-            week_number: diet.week_number,
-            day,
-            completed: newCompleted,
-            completed_at: newCompleted
-              ? new Date().toISOString()
-              : null,
-          });
-
-        if (error) {
-          throw new Error(
-            `Diet activity insert failed: ${error.message}`
-          );
-        }
-      }
-
-      setDietActivity((prev) => ({
-        ...prev,
-        [day]: newCompleted,
-      }));
-    } catch (error) {
-      console.error('Diet activity error:', error);
-
-      alert(
-        error instanceof Error
-          ? error.message
-          : 'Failed to update diet activity.'
-      );
-    } finally {
-      setDietActivityLoading((prev) => ({
-        ...prev,
-        [day]: false,
-      }));
-    }
-  }
-
-  async function handleGeneratePlan() {
-    if (generating) return;
-
-    setGenerating(true);
-
-    try {
-      const response = await fetch('/api/generate-plan', {
+      const res = await fetch('/api/weekly-checkin', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Submission failed');
 
-      if (!response.ok) {
-        alert(
-          data?.error ||
-            'Failed to generate your plan.'
-        );
-        return;
-      }
-
-      if (!data?.workout || !data?.diet) {
-        alert(
-          'Plan generated but returned data is incomplete.'
-        );
-        return;
-      }
-
-      setWorkout(data.workout);
-      setDiet(data.diet);
-      setWorkoutActivity({});
-      setDietActivity({});
-    } catch (error) {
-      console.error(
-        'Generate plan request error:',
-        error
-      );
-
-      alert('Network error. Please try again.');
+      // Success: close modal and refresh data
+      setModalOpen(false);
+      await fetchData(); // re-fetch to show new week
+    } catch (err: any) {
+      setSubmitError(err.message || 'Something went wrong');
     } finally {
-      setGenerating(false);
+      setSubmitting(false);
     }
-  }
+  };
 
-  async function handleLogout() {
-    await signOut();
-    router.replace('/login');
-  }
-
-  if (!isLoaded) {
+  if (!isUserLoaded || loading) {
     return (
-      <LoadingScreen text="Checking authentication..." />
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-slate-400">Loading dashboard...</div>
+      </div>
     );
   }
 
-  if (!isSignedIn || !userId) {
+  if (!user) {
     return (
-      <LoadingScreen text="Redirecting to login..." />
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-slate-400">Please sign in</div>
+      </div>
     );
   }
 
-  if (loading) {
-    return (
-      <LoadingScreen text="Loading your dashboard..." />
-    );
-  }
+  // Determine current week
+  const currentWeek = activeWorkout?.week_number ?? 0;
 
-  if (errorMessage) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
-        <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-red-900 p-6">
-          <h1 className="text-xl font-bold text-red-400 mb-3">
-            Dashboard Error
-          </h1>
-
-          <p className="text-slate-300 text-sm break-words">
-            {errorMessage}
-          </p>
-
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            className="mt-5 w-full rounded-xl bg-indigo-600 hover:bg-indigo-700 px-4 py-3 font-semibold"
-          >
-            Try Again
-          </button>
-        </div>
-      </main>
-    );
-  }
-
-  const hasPlan = Boolean(workout || diet);
+  // Check if we have a latest AI analysis (from previous check-in)
+  const hasAiAnalysis = latestCheckin?.ai_analysis && latestCheckin?.week_number === currentWeek - 1;
+  // Show only if it's for the previous week (or if currentWeek is 0? We'll show if exists)
+  const showInsight = latestCheckin?.ai_analysis && currentWeek > 0;
 
   return (
-    <main className="min-h-screen bg-slate-950 text-white">
-      <div className="max-w-5xl mx-auto px-4 py-6">
-        <header className="flex items-center justify-between gap-4 mb-8">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">
-              Welcome,{' '}
-              {profile?.full_name ||
-                user?.firstName ||
-                'there'}{' '}
-              👋
-            </h1>
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-8">
+      {/* Header */}
+      <header className="flex flex-wrap items-center justify-between gap-4 mb-8">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-slate-400">Welcome back, {user.fullName || 'User'}</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="inline-flex items-center rounded-full bg-indigo-900/50 px-3 py-1 text-sm font-medium text-indigo-300 ring-1 ring-indigo-500/30">
+            Active: Week {currentWeek || '—'}
+          </span>
+        </div>
+      </header>
 
-            <p className="text-slate-400 mt-1">
-              Your personalized FitAdapt plan
-            </p>
+      {/* AI Insight Card */}
+      {showInsight && (
+        <div className="mb-8 rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-5 backdrop-blur-sm">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">🧠</span>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400">
+                  Coach AI Week {latestCheckin.week_number} Review
+                </span>
+              </div>
+              <p className="mt-1 text-slate-200 leading-relaxed">
+                {latestCheckin.ai_analysis}
+              </p>
+            </div>
           </div>
+        </div>
+      )}
 
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="shrink-0 px-4 py-2.5 bg-red-500 hover:bg-red-600 rounded-xl font-semibold"
-          >
-            Logout
-          </button>
-        </header>
+      {/* Dashboard content (existing cards for workout & diet plans would go here) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {/* Workout Plan Card - placeholder */}
+        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+          <h2 className="text-xl font-semibold text-indigo-300">Workout Plan</h2>
+          <div className="mt-4 text-slate-400">
+            {activeWorkout ? (
+              <p>Week {activeWorkout.week_number} active</p>
+            ) : (
+              <p>No active workout plan</p>
+            )}
+          </div>
+        </div>
+        {/* Diet Plan Card */}
+        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+          <h2 className="text-xl font-semibold text-emerald-300">Diet Plan</h2>
+          <div className="mt-4 text-slate-400">
+            {activeDiet ? (
+              <p>Week {activeDiet.week_number} active</p>
+            ) : (
+              <p>No active diet plan</p>
+            )}
+          </div>
+        </div>
+      </div>
 
-        {!hasPlan && (
-          <section className="bg-slate-900 border border-slate-700 rounded-2xl p-6 sm:p-8 text-center">
-            <div className="text-5xl mb-4">🚀</div>
+      {/* Action button */}
+      <div className="flex justify-end">
+        <button
+          onClick={() => setModalOpen(true)}
+          className="inline-flex items-center rounded-lg bg-indigo-600 px-6 py-3 text-sm font-medium text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-950"
+        >
+          🏁 Complete Week {currentWeek} & Review
+        </button>
+      </div>
 
-            <h2 className="text-2xl font-bold mb-2">
-              No Active Plan
-            </h2>
-
-            <p className="text-slate-400 mb-6">
-              Generate your personalized workout and diet
-              plan based on your profile.
+      {/* Modal */}
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-0 overflow-hidden shadow-2xl">
+          <DialogHeader className="p-6 pb-2">
+            <DialogTitle className="text-2xl font-bold text-white">
+              Weekly Check-In
+            </DialogTitle>
+            <p className="text-sm text-slate-400">
+              How did this week go? Let's review your progress.
             </p>
+          </DialogHeader>
 
-            <button
-              type="button"
-              onClick={handleGeneratePlan}
-              disabled={generating}
-              className="px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-slate-700 rounded-xl font-bold"
-            >
-              {generating
-                ? 'Generating...'
-                : '🚀 Generate My First Plan'}
-            </button>
-          </section>
-        )}
-
-        {hasPlan && (
-          <>
-            {workout && (
-              <WorkoutSection
-                workout={workout}
-                activity={workoutActivity}
-                activityLoading={
-                  workoutActivityLoading
-                }
-                onToggleComplete={
-                  toggleWorkoutComplete
-                }
+          <form onSubmit={handleSubmit} className="p-6 pt-3 space-y-5">
+            {/* Weight */}
+            <div>
+              <label className="block text-sm font-medium text-slate-300">
+                Current Weight (kg)
+              </label>
+              <input
+                type="number"
+                name="weight_kg"
+                value={formData.weight_kg}
+                onChange={handleFormChange}
+                step="0.1"
+                min="0"
+                required
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                placeholder="e.g. 72.5"
               />
+            </div>
+
+            {/* Workout Difficulty */}
+            <div>
+              <label className="block text-sm font-medium text-slate-300">
+                Workout Difficulty
+              </label>
+              <select
+                name="workout_difficulty"
+                value={formData.workout_difficulty}
+                onChange={handleFormChange}
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              >
+                <option value="Too Easy">Too Easy</option>
+                <option value="Just Right">Just Right</option>
+                <option value="Too Hard">Too Hard</option>
+              </select>
+            </div>
+
+            {/* Energy Rating */}
+            <div>
+              <label className="block text-sm font-medium text-slate-300">
+                Energy Level (1–5)
+              </label>
+              <div className="mt-1 flex items-center gap-2">
+                {[1, 2, 3, 4, 5].map((num) => (
+                  <button
+                    key={num}
+                    type="button"
+                    onClick={() => handleEnergyChange(num)}
+                    className={`h-10 w-10 rounded-full text-sm font-semibold transition ${
+                      formData.energy_rating === num
+                        ? 'bg-indigo-600 text-white ring-2 ring-indigo-400 ring-offset-2 ring-offset-slate-900'
+                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    }`}
+                  >
+                    {num}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div>
+              <label className="block text-sm font-medium text-slate-300">
+                Feedback / Notes
+              </label>
+              <textarea
+                name="user_notes"
+                value={formData.user_notes}
+                onChange={handleFormChange}
+                rows={3}
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                placeholder="How did this week feel? Any injuries or cravings?"
+              />
+            </div>
+
+            {submitError && (
+              <div className="text-sm text-red-400 bg-red-950/30 p-3 rounded-lg border border-red-800/50">
+                {submitError}
+              </div>
             )}
 
-            {diet && (
-              <DietSection
-                diet={diet}
-                activity={dietActivity}
-                activityLoading={
-                  dietActivityLoading
-                }
-                onToggleComplete={
-                  toggleDietComplete
-                }
-              />
-            )}
-
-            <div className="text-center pb-10">
+            {/* Actions */}
+            <div className="flex justify-end gap-3 pt-2">
               <button
                 type="button"
-                onClick={handleGeneratePlan}
-                disabled={generating}
-                className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-700 rounded-xl font-semibold"
+                onClick={() => setModalOpen(false)}
+                className="rounded-lg border border-slate-700 px-5 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800"
+                disabled={submitting}
               >
-                {generating
-                  ? 'Generating...'
-                  : '🔄 Regenerate Plan'}
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-medium text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {submitting ? (
+                  <>
+                    <span className="animate-spin">⚡</span>
+                    AI Coach is analyzing...
+                  </>
+                ) : (
+                  'Submit Review'
+                )}
               </button>
             </div>
-          </>
-        )}
-      </div>
-    </main>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
-}
-
-function LoadingScreen({ text }: { text: string }) {
-  return (
-    <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
-      <div className="text-center">
-        <div className="text-4xl mb-3 animate-pulse">
-          ⚡
-        </div>
-
-        <p className="text-slate-300">
-          {text}
-        </p>
-      </div>
-    </main>
-  );
-}
+    }
