@@ -1,5 +1,3 @@
-// app/dashboard/page.tsx
-
 'use client';
 
 import {
@@ -16,6 +14,7 @@ import {
   Clock3,
   Dumbbell,
   Flame,
+  Loader2,
   LogOut,
   RefreshCw,
   Sparkles,
@@ -26,7 +25,6 @@ import {
 } from 'lucide-react';
 
 import { useUser } from '@clerk/nextjs';
-import { supabase } from '@/lib/supabase';
 
 // ============================================================
 // Types
@@ -40,7 +38,7 @@ type WorkoutDifficulty =
 interface Profile {
   id: string;
   clerk_user_id: string;
-  initial_weight_kg: number | null;
+  initial_weight_kg?: number | null;
   age?: number | null;
   height_cm?: number | null;
   goal?: string | null;
@@ -53,7 +51,7 @@ interface WorkoutPlan {
   id: string;
   user_id: string;
   week_number: number;
-  plan_data: unknown;
+  plan_data: any;
   is_active: boolean;
   created_at?: string;
 }
@@ -62,7 +60,7 @@ interface DietPlan {
   id: string;
   user_id: string;
   week_number: number;
-  plan_data: unknown;
+  plan_data: any;
   is_active: boolean;
   created_at?: string;
 }
@@ -79,6 +77,16 @@ interface WeeklyCheckin {
   user_notes: string | null;
   ai_analysis: string | null;
   created_at: string;
+}
+
+interface DashboardResponse {
+  hasProfile: boolean;
+  profile: Profile | null;
+  workout: WorkoutPlan | null;
+  diet: DietPlan | null;
+  workoutActivity: any[];
+  dietActivity: any[];
+  latestReview: WeeklyCheckin | null;
 }
 
 interface Exercise {
@@ -110,9 +118,11 @@ interface DietDay {
   breakfast?: Meal | Meal[];
   lunch?: Meal | Meal[];
   dinner?: Meal | Meal[];
-  snacks?: Meal[];
+  snacks?: Meal | Meal[];
+
   daily_total_calories?: number | string;
   total_calories?: number | string;
+
   daily_total_protein_g?: number | string;
   total_protein_g?: number | string;
 }
@@ -135,21 +145,6 @@ const DAYS = [
   'Sunday',
 ];
 
-const DEFAULT_WORKOUT_DAY: WorkoutDay = {
-  focus: 'Recovery / Rest',
-  duration_minutes: 0,
-  exercises: [],
-};
-
-const DEFAULT_DIET_DAY: DietDay = {
-  breakfast: [],
-  lunch: [],
-  dinner: [],
-  snacks: [],
-  daily_total_calories: 0,
-  daily_total_protein_g: 0,
-};
-
 // ============================================================
 // Helpers
 // ============================================================
@@ -168,52 +163,62 @@ function toNumber(
   value: unknown,
   fallback = 0
 ): number {
-  const number = Number(value);
+  const n = Number(value);
 
-  return Number.isFinite(number)
-    ? number
+  return Number.isFinite(n)
+    ? n
     : fallback;
 }
 
-function formatNumber(
+function displayNumber(
   value: unknown,
   fallback = '0'
 ): string {
-  const number = Number(value);
+  const n = Number(value);
 
-  if (!Number.isFinite(number)) {
+  if (!Number.isFinite(n)) {
     return fallback;
   }
 
-  return Number.isInteger(number)
-    ? String(number)
-    : number.toFixed(1);
+  return Number.isInteger(n)
+    ? String(n)
+    : n.toFixed(1);
 }
 
-function getPlanData<T>(
+function getPlanDays<T>(
   planData: unknown
 ): Record<string, T> {
   if (!isObject(planData)) {
     return {};
   }
 
-  // Handles:
-  // { Monday: {...}, Tuesday: {...} }
-  if (
-    DAYS.some(
-      (day) =>
-        Object.prototype.hasOwnProperty.call(
-          planData,
-          day
-        )
-    )
-  ) {
+  // Normal structure:
+  //
+  // {
+  //   Monday: {...},
+  //   Tuesday: {...}
+  // }
+
+  const hasDays = DAYS.some(
+    (day) =>
+      Object.prototype.hasOwnProperty.call(
+        planData,
+        day
+      )
+  );
+
+  if (hasDays) {
     return planData as Record<string, T>;
   }
 
-  // Also handles accidental:
-  // { workout: { Monday: {...} } }
-  // { diet: { Monday: {...} } }
+  // Defensive support for:
+  //
+  // {
+  //   workout: {
+  //      Monday: {...}
+  //   }
+  // }
+
   if (
     isObject(planData.workout) &&
     DAYS.some((day) =>
@@ -223,8 +228,19 @@ function getPlanData<T>(
       )
     )
   ) {
-    return planData.workout as Record<string, T>;
+    return planData.workout as Record<
+      string,
+      T
+    >;
   }
+
+  // Defensive support for:
+  //
+  // {
+  //   diet: {
+  //      Monday: {...}
+  //   }
+  // }
 
   if (
     isObject(planData.diet) &&
@@ -235,7 +251,10 @@ function getPlanData<T>(
       )
     )
   ) {
-    return planData.diet as Record<string, T>;
+    return planData.diet as Record<
+      string,
+      T
+    >;
   }
 
   return {};
@@ -245,28 +264,36 @@ function getWorkoutDay(
   planData: unknown,
   day: string
 ): WorkoutDay {
-  const data =
-    getPlanData<WorkoutDay>(planData)[day];
+  const allDays =
+    getPlanDays<WorkoutDay>(
+      planData
+    );
 
-  if (!isObject(data)) {
-    return DEFAULT_WORKOUT_DAY;
+  const value = allDays[day];
+
+  if (!isObject(value)) {
+    return {
+      focus: 'Rest / Recovery',
+      duration_minutes: 0,
+      exercises: [],
+    };
   }
 
   return {
     focus:
-      typeof data.focus === 'string'
-        ? data.focus
+      typeof value.focus === 'string'
+        ? value.focus
         : 'Training',
 
     duration_minutes:
-      data.duration_minutes ??
-      data.duration ??
+      value.duration_minutes ??
+      value.duration ??
       0,
 
     exercises: Array.isArray(
-      data.exercises
+      value.exercises
     )
-      ? data.exercises
+      ? value.exercises
       : [],
   };
 }
@@ -275,35 +302,51 @@ function getDietDay(
   planData: unknown,
   day: string
 ): DietDay {
-  const data =
-    getPlanData<DietDay>(planData)[day];
+  const allDays =
+    getPlanDays<DietDay>(
+      planData
+    );
 
-  if (!isObject(data)) {
-    return DEFAULT_DIET_DAY;
+  const value = allDays[day];
+
+  if (!isObject(value)) {
+    return {
+      breakfast: [],
+      lunch: [],
+      dinner: [],
+      snacks: [],
+      daily_total_calories: 0,
+      daily_total_protein_g: 0,
+    };
   }
 
-  return data;
+  return value;
 }
 
 function normalizeMeals(
-  meal: Meal | Meal[] | undefined
+  value: Meal | Meal[] | undefined
 ): Meal[] {
-  if (!meal) {
+  if (!value) {
     return [];
   }
 
-  if (Array.isArray(meal)) {
-    return meal.filter(isObject);
+  if (Array.isArray(value)) {
+    return value.filter(
+      (item): item is Meal =>
+        isObject(item)
+    );
   }
 
-  if (isObject(meal)) {
-    return [meal];
+  if (isObject(value)) {
+    return [value];
   }
 
   return [];
 }
 
-function mealName(meal: Meal): string {
+function getMealName(
+  meal: Meal
+): string {
   return (
     meal.meal ||
     meal.name ||
@@ -311,23 +354,43 @@ function mealName(meal: Meal): string {
   );
 }
 
-function mealCalories(meal: Meal): number {
+function getMealCalories(
+  meal: Meal
+): number {
   return toNumber(
-    meal.calories,
-    0
+    meal.calories
   );
 }
 
-function mealProtein(meal: Meal): number {
+function getMealProtein(
+  meal: Meal
+): number {
   return toNumber(
     meal.protein_g ??
-      meal.protein,
-    0
+      meal.protein
   );
+}
+
+function buildActivityMap(
+  rows: any[]
+): ActivityMap {
+  const map: ActivityMap = {};
+
+  for (const row of rows) {
+    if (
+      typeof row?.day ===
+      'string'
+    ) {
+      map[row.day] =
+        Boolean(row.completed);
+    }
+  }
+
+  return map;
 }
 
 // ============================================================
-// Main Component
+// Component
 // ============================================================
 
 export default function DashboardPage() {
@@ -338,7 +401,7 @@ export default function DashboardPage() {
   } = useUser();
 
   // ----------------------------------------------------------
-  // Data state
+  // Dashboard state
   // ----------------------------------------------------------
 
   const [loading, setLoading] =
@@ -347,24 +410,20 @@ export default function DashboardPage() {
   const [error, setError] =
     useState('');
 
-  const [profile, setProfile] =
-    useState<Profile | null>(null);
-
-  const [activeWorkout, setActiveWorkout] =
-    useState<WorkoutPlan | null>(null);
-
-  const [activeDiet, setActiveDiet] =
-    useState<DietPlan | null>(null);
-
-  const [latestCheckin, setLatestCheckin] =
-    useState<WeeklyCheckin | null>(null);
+  const [dashboard, setDashboard] =
+    useState<DashboardResponse | null>(
+      null
+    );
 
   // ----------------------------------------------------------
-  // Generation state
+  // Generate plan state
   // ----------------------------------------------------------
 
   const [generatingPlan, setGeneratingPlan] =
     useState(false);
+
+  const [generateError, setGenerateError] =
+    useState('');
 
   // ----------------------------------------------------------
   // Activity state
@@ -380,7 +439,7 @@ export default function DashboardPage() {
     useState<string | null>(null);
 
   // ----------------------------------------------------------
-  // UI state
+  // Expanded cards
   // ----------------------------------------------------------
 
   const [expandedWorkoutDay, setExpandedWorkoutDay] =
@@ -390,7 +449,7 @@ export default function DashboardPage() {
     useState<string | null>('Monday');
 
   // ----------------------------------------------------------
-  // Weekly review state
+  // Review modal
   // ----------------------------------------------------------
 
   const [modalOpen, setModalOpen] =
@@ -403,269 +462,82 @@ export default function DashboardPage() {
     useState('');
 
   const [formData, setFormData] =
-    useState<{
-      weight_kg: string;
-      workout_difficulty: WorkoutDifficulty;
-      energy_rating: number;
-      user_notes: string;
-    }>({
+    useState({
       weight_kg: '',
       workout_difficulty:
-        'Just Right',
+        'Just Right' as WorkoutDifficulty,
       energy_rating: 3,
       user_notes: '',
     });
 
   // ==========================================================
-  // Fetch activities
+  // Fetch dashboard
   // ==========================================================
 
-  const fetchActivities = useCallback(
-    async (
-      profileId: string,
-      weekNumber: number
-    ) => {
-      const [
-        workoutResult,
-        dietResult,
-      ] = await Promise.all([
-        supabase
-          .from('workout_activity')
-          .select(
-            'day, completed'
-          )
-          .eq(
-            'user_id',
-            profileId
-          )
-          .eq(
-            'week_number',
-            weekNumber
-          ),
-
-        supabase
-          .from('diet_activity')
-          .select(
-            'day, completed'
-          )
-          .eq(
-            'user_id',
-            profileId
-          )
-          .eq(
-            'week_number',
-            weekNumber
-          ),
-      ]);
-
-      if (workoutResult.error) {
-        console.error(
-          'Workout activity error:',
-          workoutResult.error
-        );
-      }
-
-      if (dietResult.error) {
-        console.error(
-          'Diet activity error:',
-          dietResult.error
-        );
-      }
-
-      const workoutMap: ActivityMap =
-        {};
-
-      const dietMap: ActivityMap =
-        {};
-
-      (
-        workoutResult.data || []
-      ).forEach(
-        (row: any) => {
-          if (
-            typeof row.day ===
-            'string'
-          ) {
-            workoutMap[
-              row.day
-            ] = Boolean(
-              row.completed
-            );
-          }
-        }
-      );
-
-      (
-        dietResult.data || []
-      ).forEach(
-        (row: any) => {
-          if (
-            typeof row.day ===
-            'string'
-          ) {
-            dietMap[
-              row.day
-            ] = Boolean(
-              row.completed
-            );
-          }
-        }
-      );
-
-      setWorkoutActivity(
-        workoutMap
-      );
-
-      setDietActivity(
-        dietMap
-      );
-    },
-    []
-  );
-
-  // ==========================================================
-  // Fetch dashboard data
-  // ==========================================================
-
-  const fetchData = useCallback(
+  const fetchDashboard = useCallback(
     async () => {
-      if (!user) {
-        return;
-      }
-
       setLoading(true);
       setError('');
 
       try {
-        // ----------------------------------------------------
-        // Profile
-        // ----------------------------------------------------
+        const response =
+          await fetch(
+            '/api/dashboard-data',
+            {
+              method: 'GET',
+              cache: 'no-store',
+              credentials: 'include',
+            }
+          );
 
-        const {
-          data: profileData,
-          error: profileError,
-        } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq(
-            'clerk_user_id',
-            user.id
-          )
-          .maybeSingle();
+        const data =
+          await response.json();
 
-        if (profileError) {
-          throw profileError;
-        }
-
-        if (!profileData) {
+        if (!response.ok) {
           throw new Error(
-            'Your profile was not found. Please complete onboarding first.'
+            data?.error ||
+              'Failed to load dashboard'
           );
         }
 
-        setProfile(
-          profileData
+        const result =
+          data as DashboardResponse;
+
+        setDashboard(result);
+
+        setWorkoutActivity(
+          buildActivityMap(
+            result.workoutActivity ||
+              []
+          )
         );
 
-        // ----------------------------------------------------
-        // Active plans
-        // ----------------------------------------------------
-
-        const [
-          workoutResult,
-          dietResult,
-          checkinResult,
-        ] = await Promise.all([
-          supabase
-            .from('workout_plans')
-            .select('*')
-            .eq(
-              'user_id',
-              profileData.id
-            )
-            .eq(
-              'is_active',
-              true
-            )
-            .maybeSingle(),
-
-          supabase
-            .from('diet_plans')
-            .select('*')
-            .eq(
-              'user_id',
-              profileData.id
-            )
-            .eq(
-              'is_active',
-              true
-            )
-            .maybeSingle(),
-
-          supabase
-            .from('weekly_checkins')
-            .select('*')
-            .eq(
-              'user_id',
-              profileData.id
-            )
-            .order(
-              'created_at',
-              {
-                ascending: false,
-              }
-            )
-            .limit(1)
-            .maybeSingle(),
-        ]);
-
-        if (workoutResult.error) {
-          throw workoutResult.error;
-        }
-
-        if (dietResult.error) {
-          throw dietResult.error;
-        }
-
-        if (checkinResult.error) {
-          throw checkinResult.error;
-        }
-
-        setActiveWorkout(
-          workoutResult.data ||
-            null
+        setDietActivity(
+          buildActivityMap(
+            result.dietActivity ||
+              []
+          )
         );
 
-        setActiveDiet(
-          dietResult.data ||
-            null
-        );
-
-        setLatestCheckin(
-          checkinResult.data ||
-            null
-        );
-
-        // ----------------------------------------------------
         // Prefill weight
-        // ----------------------------------------------------
-
         if (
-          checkinResult.data
+          result.latestReview
+            ?.weight_kg
         ) {
           setFormData(
             (previous) => ({
               ...previous,
               weight_kg:
                 String(
-                  checkinResult
-                    .data
+                  result
+                    .latestReview!
                     .weight_kg
                 ),
             })
           );
         } else if (
-          profileData.initial_weight_kg !=
+          result.profile
+            ?.initial_weight_kg !=
           null
         ) {
           setFormData(
@@ -673,86 +545,56 @@ export default function DashboardPage() {
               ...previous,
               weight_kg:
                 String(
-                  profileData.initial_weight_kg
+                  result
+                    .profile!
+                    .initial_weight_kg
                 ),
             })
           );
         }
-
-        // ----------------------------------------------------
-        // Activities
-        // ----------------------------------------------------
-
-        const weekNumber =
-          workoutResult.data
-            ?.week_number ??
-          dietResult.data
-            ?.week_number;
-
-        if (weekNumber) {
-          await fetchActivities(
-            profileData.id,
-            weekNumber
-          );
-        } else {
-          setWorkoutActivity(
-            {}
-          );
-          setDietActivity(
-            {}
-          );
-        }
       } catch (err: any) {
         console.error(
-          'Dashboard fetch error:',
+          'Dashboard error:',
           err
         );
 
         setError(
           err?.message ||
-            'Failed to load dashboard.'
+            'Unable to load dashboard.'
         );
       } finally {
         setLoading(false);
       }
     },
-    [
-      user,
-      fetchActivities,
-    ]
+    []
   );
 
   // ==========================================================
-  // Initial load
+  // Initial fetch
   // ==========================================================
 
   useEffect(() => {
-    if (
-      isUserLoaded &&
-      user
-    ) {
-      fetchData();
+    if (isUserLoaded) {
+      if (user) {
+        fetchDashboard();
+      } else {
+        setLoading(false);
+      }
     }
   }, [
     isUserLoaded,
     user,
-    fetchData,
+    fetchDashboard,
   ]);
 
   // ==========================================================
-  // Generate first plan
+  // Generate first AI plan
   // ==========================================================
 
-  const handleGeneratePlan =
+  const generateFirstPlan =
     async () => {
-      if (!user) {
-        return;
-      }
-
-      setGeneratingPlan(
-        true
-      );
-      setError('');
+      setGeneratingPlan(true);
+      setGenerateError('');
 
       try {
         const response =
@@ -764,218 +606,157 @@ export default function DashboardPage() {
                 'Content-Type':
                   'application/json',
               },
-              body: JSON.stringify(
-                {
-                  week_number: 1,
-                }
-              ),
+              credentials: 'include',
             }
           );
 
-        let data: any = null;
-
-        try {
-          data =
-            await response.json();
-        } catch {
-          data = null;
-        }
+        const data =
+          await response.json();
 
         if (!response.ok) {
           throw new Error(
             data?.error ||
-              'Failed to generate your plan.'
+              'Failed to generate plan'
           );
         }
 
-        await fetchData();
+        // Reload dashboard data
+        await fetchDashboard();
       } catch (err: any) {
         console.error(
           'Generate plan error:',
           err
         );
 
-        setError(
+        setGenerateError(
           err?.message ||
-            'Unable to generate your plan.'
+            'Failed to generate your plan.'
         );
       } finally {
-        setGeneratingPlan(
-          false
-        );
+        setGeneratingPlan(false);
       }
     };
 
   // ==========================================================
-  // Toggle activity
+  // Activity toggle
   // ==========================================================
 
-  const toggleActivity =
-    async (
-      type:
-        | 'workout'
-        | 'diet',
-      day: string
-    ) => {
-      if (
-        !profile ||
-        !currentWeek
-      ) {
-        return;
+  const toggleActivity = async (
+    type: 'workout' | 'diet',
+    day: string
+  ) => {
+    if (
+      !dashboard?.profile ||
+      !currentWeek
+    ) {
+      return;
+    }
+
+    const key =
+      `${type}-${day}`;
+
+    const previousValue =
+      type === 'workout'
+        ? Boolean(
+            workoutActivity[day]
+          )
+        : Boolean(
+            dietActivity[day]
+          );
+
+    const nextValue =
+      !previousValue;
+
+    setActivityLoading(key);
+
+    // Optimistic UI
+    if (type === 'workout') {
+      setWorkoutActivity(
+        (previous) => ({
+          ...previous,
+          [day]: nextValue,
+        })
+      );
+    } else {
+      setDietActivity(
+        (previous) => ({
+          ...previous,
+          [day]: nextValue,
+        })
+      );
+    }
+
+    try {
+      const response =
+        await fetch('/api/logs', {
+          method: 'POST',
+          headers: {
+            'Content-Type':
+              'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            type,
+            day,
+            week_number:
+              currentWeek,
+            completed:
+              nextValue,
+          }),
+        });
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.error ||
+            'Failed to save activity'
+        );
       }
-
-      const key =
-        `${type}-${day}`;
-
-      setActivityLoading(
-        key
+    } catch (err: any) {
+      console.error(
+        'Activity error:',
+        err
       );
 
-      const currentValue =
-        type === 'workout'
-          ? Boolean(
-              workoutActivity[
-                day
-              ]
-            )
-          : Boolean(
-              dietActivity[
-                day
-              ]
-            );
-
-      const nextValue =
-        !currentValue;
-
-      try {
-        const table =
-          type === 'workout'
-            ? 'workout_activity'
-            : 'diet_activity';
-
-        // ----------------------------------------------------
-        // Look for an existing row first.
-        // This avoids requiring a specific UNIQUE constraint.
-        // ----------------------------------------------------
-
-        const {
-          data: existing,
-          error: findError,
-        } = await supabase
-          .from(table)
-          .select('id')
-          .eq(
-            'user_id',
-            profile.id
-          )
-          .eq(
-            'week_number',
-            currentWeek
-          )
-          .eq(
-            'day',
-            day
-          )
-          .maybeSingle();
-
-        if (findError) {
-          throw findError;
-        }
-
-        if (existing?.id) {
-          const {
-            error: updateError,
-          } = await supabase
-            .from(table)
-            .update({
-              completed:
-                nextValue,
-            })
-            .eq(
-              'id',
-              existing.id
-            );
-
-          if (updateError) {
-            throw updateError;
-          }
-        } else {
-          const {
-            error: insertError,
-          } = await supabase
-            .from(table)
-            .insert({
-              user_id:
-                profile.id,
-              week_number:
-                currentWeek,
-              day,
-              completed:
-                nextValue,
-            });
-
-          if (insertError) {
-            throw insertError;
-          }
-        }
-
-        // ----------------------------------------------------
-        // Update UI immediately
-        // ----------------------------------------------------
-
-        if (
-          type === 'workout'
-        ) {
-          setWorkoutActivity(
-            (previous) => ({
-              ...previous,
-              [day]:
-                nextValue,
-            })
-          );
-        } else {
-          setDietActivity(
-            (previous) => ({
-              ...previous,
-              [day]:
-                nextValue,
-            })
-          );
-        }
-      } catch (err: any) {
-        console.error(
-          'Activity update error:',
-          err
+      // Roll back optimistic update
+      if (type === 'workout') {
+        setWorkoutActivity(
+          (previous) => ({
+            ...previous,
+            [day]: previousValue,
+          })
         );
-
-        setError(
-          err?.message ||
-            `Failed to update ${type} activity.`
-        );
-      } finally {
-        setActivityLoading(
-          null
+      } else {
+        setDietActivity(
+          (previous) => ({
+            ...previous,
+            [day]: previousValue,
+          })
         );
       }
-    };
+
+      alert(
+        err?.message ||
+          'Could not save activity.'
+      );
+    } finally {
+      setActivityLoading(null);
+    }
+  };
 
   // ==========================================================
   // Weekly review submit
   // ==========================================================
 
-  const handleReviewSubmit =
+  const submitWeeklyReview =
     async (
       event: React.FormEvent
     ) => {
       event.preventDefault();
 
-      if (!currentWeek) {
-        return;
-      }
-
-      setSubmittingReview(
-        true
-      );
+      setSubmittingReview(true);
       setSubmitError('');
 
       try {
@@ -1004,40 +785,30 @@ export default function DashboardPage() {
                 'Content-Type':
                   'application/json',
               },
-              body: JSON.stringify(
-                {
-                  weight_kg:
-                    weight,
-                  workout_difficulty:
-                    formData.workout_difficulty,
-                  energy_rating:
-                    formData.energy_rating,
-                  user_notes:
-                    formData.user_notes,
-                }
-              ),
+              credentials: 'include',
+              body: JSON.stringify({
+                weight_kg: weight,
+                workout_difficulty:
+                  formData.workout_difficulty,
+                energy_rating:
+                  formData.energy_rating,
+                user_notes:
+                  formData.user_notes,
+              }),
             }
           );
 
-        let data: any = null;
-
-        try {
-          data =
-            await response.json();
-        } catch {
-          data = null;
-        }
+        const data =
+          await response.json();
 
         if (!response.ok) {
           throw new Error(
             data?.error ||
-              'Weekly review failed.'
+              'Weekly review failed'
           );
         }
 
-        setModalOpen(
-          false
-        );
+        setModalOpen(false);
 
         setFormData(
           (previous) => ({
@@ -1046,7 +817,7 @@ export default function DashboardPage() {
           })
         );
 
-        await fetchData();
+        await fetchDashboard();
       } catch (err: any) {
         console.error(
           'Weekly review error:',
@@ -1058,9 +829,7 @@ export default function DashboardPage() {
             'Something went wrong.'
         );
       } finally {
-        setSubmittingReview(
-          false
-        );
+        setSubmittingReview(false);
       }
     };
 
@@ -1069,55 +838,47 @@ export default function DashboardPage() {
   // ==========================================================
 
   const currentWeek =
-    activeWorkout?.week_number ??
-    activeDiet?.week_number ??
-    0;
+    dashboard?.workout
+      ?.week_number ??
+    dashboard?.diet
+      ?.week_number ??
+    null;
 
-  const hasWorkout =
-    Boolean(
-      activeWorkout
-    );
+  const workoutDays =
+    useMemo(() => {
+      return DAYS.map(
+        (day) => ({
+          day,
+          data:
+            getWorkoutDay(
+              dashboard
+                ?.workout
+                ?.plan_data,
+              day
+            ),
+        })
+      );
+    }, [
+      dashboard?.workout,
+    ]);
 
-  const hasDiet =
-    Boolean(activeDiet);
-
-  const hasAnyPlan =
-    hasWorkout ||
-    hasDiet;
-
-  const workoutPlanData =
-    useMemo(
-      () =>
-        activeWorkout
-          ? activeWorkout.plan_data
-          : {},
-      [activeWorkout]
-    );
-
-  const dietPlanData =
-    useMemo(
-      () =>
-        activeDiet
-          ? activeDiet.plan_data
-          : {},
-      [activeDiet]
-    );
-
-  const completedWorkoutCount =
-    DAYS.filter(
-      (day) =>
-        workoutActivity[
-          day
-        ]
-    ).length;
-
-  const completedDietCount =
-    DAYS.filter(
-      (day) =>
-        dietActivity[
-          day
-        ]
-    ).length;
+  const dietDays =
+    useMemo(() => {
+      return DAYS.map(
+        (day) => ({
+          day,
+          data:
+            getDietDay(
+              dashboard
+                ?.diet
+                ?.plan_data,
+              day
+            ),
+        })
+      );
+    }, [
+      dashboard?.diet,
+    ]);
 
   // ==========================================================
   // Loading
@@ -1128,11 +889,11 @@ export default function DashboardPage() {
     loading
   ) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <div className="h-10 w-10 animate-spin rounded-full border-2 border-slate-700 border-t-indigo-500" />
+          <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
 
-          <p className="text-sm text-slate-400">
+          <p className="text-slate-400">
             Loading your dashboard...
           </p>
         </div>
@@ -1146,14 +907,14 @@ export default function DashboardPage() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
         <div className="rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
-          <h1 className="text-xl font-bold">
-            Please sign in
+          <h1 className="text-xl font-bold text-white">
+            Sign in required
           </h1>
 
-          <p className="mt-2 text-sm text-slate-400">
-            You need to be signed in to view your dashboard.
+          <p className="mt-2 text-slate-400">
+            Please sign in to access your dashboard.
           </p>
         </div>
       </div>
@@ -1161,94 +922,204 @@ export default function DashboardPage() {
   }
 
   // ==========================================================
-  // Empty state
+  // API error
   // ==========================================================
 
-  if (!hasAnyPlan) {
+  if (
+    error &&
+    !dashboard
+  ) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+        <div className="max-w-md rounded-2xl border border-red-900/50 bg-slate-900 p-8">
+          <div className="flex items-center gap-3">
+            <X className="h-6 w-6 text-red-400" />
+
+            <h1 className="text-xl font-bold text-white">
+              Dashboard Error
+            </h1>
+          </div>
+
+          <p className="mt-4 text-slate-400">
+            {error}
+          </p>
+
+          <button
+            onClick={
+              fetchDashboard
+            }
+            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Try Again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================================
+  // State A — No profile
+  // ==========================================================
+
+  if (
+    dashboard &&
+    !dashboard.hasProfile
+  ) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-10">
-        <header className="mx-auto max-w-6xl flex items-center justify-between">
+        <header className="mx-auto max-w-5xl flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              Dashboard
-            </h1>
-
-            <p className="mt-1 text-slate-400">
-              Welcome back,{' '}
+            <h1 className="text-3xl font-bold">
+              Welcome,{' '}
               {user.firstName ||
                 user.fullName ||
                 'User'}
+            </h1>
+
+            <p className="mt-1 text-slate-400">
+              Let's set up your FitAdapt profile.
             </p>
           </div>
 
           <button
             onClick={() =>
-              signOut()
+              signOut({
+                redirectUrl:
+                  '/sign-in',
+              })
             }
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white"
+            className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
           >
-            <LogOut
-              size={16}
-            />
+            <LogOut className="mr-2 inline h-4 w-4" />
             Logout
           </button>
         </header>
 
-        {error && (
-          <div className="mx-auto mt-6 max-w-6xl rounded-xl border border-red-500/30 bg-red-950/30 p-4 text-sm text-red-300">
-            {error}
-          </div>
-        )}
-
-        <main className="mx-auto mt-10 max-w-3xl">
-          <div className="rounded-3xl border border-slate-800 bg-slate-900 p-8 text-center shadow-2xl md:p-12">
-            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-indigo-600/10 ring-1 ring-indigo-500/20">
-              <Sparkles
-                size={38}
-                className="text-indigo-400"
-              />
+        <main className="mx-auto mt-10 max-w-2xl">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center shadow-xl">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-600/20">
+              <Target className="h-8 w-8 text-indigo-400" />
             </div>
 
-            <h2 className="mt-6 text-2xl font-bold text-white md:text-3xl">
+            <h2 className="mt-6 text-2xl font-bold text-white">
+              Complete Your Profile
+            </h2>
+
+            <p className="mx-auto mt-3 max-w-lg text-slate-400">
+              Your profile is not configured yet.
+              Complete onboarding so FitAdapt can
+              generate a plan based on your goals,
+              equipment, preferences and budget.
+            </p>
+
+            <a
+              href="/onboarding"
+              className="mt-8 inline-flex items-center justify-center rounded-xl bg-indigo-600 px-7 py-3 font-semibold text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-700"
+            >
+              Complete Profile
+            </a>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // ==========================================================
+  // State B — Profile but no plan
+  // ==========================================================
+
+  const hasWorkout =
+    Boolean(
+      dashboard?.workout
+    );
+
+  const hasDiet =
+    Boolean(
+      dashboard?.diet
+    );
+
+  const hasAnyPlan =
+    hasWorkout ||
+    hasDiet;
+
+  if (
+    dashboard &&
+    dashboard.hasProfile &&
+    !hasAnyPlan
+  ) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-10">
+        <header className="mx-auto max-w-6xl flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold">
+              Welcome,{' '}
+              {user.firstName ||
+                user.fullName ||
+                'User'}
+            </h1>
+
+            <p className="mt-1 text-slate-400">
+              Your profile is ready.
+            </p>
+          </div>
+
+          <button
+            onClick={() =>
+              signOut({
+                redirectUrl:
+                  '/sign-in',
+              })
+            }
+            className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
+          >
+            <LogOut className="mr-2 inline h-4 w-4" />
+            Logout
+          </button>
+        </header>
+
+        <main className="mx-auto mt-12 max-w-2xl">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center shadow-xl">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-500/10">
+              <Sparkles className="h-8 w-8 text-emerald-400" />
+            </div>
+
+            <h2 className="mt-6 text-2xl font-bold text-white">
               No Active Plan Found
             </h2>
 
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-400 md:text-base">
-              Your FitAdapt journey starts here.
-              Generate your personalized 7-day
-              workout and diet plan using your
-              profile, goals, equipment and
-              preferences.
+            <p className="mx-auto mt-3 max-w-lg text-slate-400">
+              Your profile is complete, but you don't
+              have an active workout or diet plan yet.
+              Let AI build your first 7-day plan.
             </p>
 
-            {generatingPlan ? (
-              <div className="mt-8 rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-6">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600/20">
-                  <RefreshCw
-                    size={24}
-                    className="animate-spin text-indigo-400"
-                  />
-                </div>
+            {generateError && (
+              <div className="mt-6 rounded-lg border border-red-900/50 bg-red-950/30 p-4 text-left text-sm text-red-300">
+                {generateError}
+              </div>
+            )}
 
-                <p className="mt-4 font-semibold text-indigo-300">
-                  AI Coach is crafting your
-                  7-day plan...
+            {generatingPlan ? (
+              <div className="mt-8 flex flex-col items-center gap-4">
+                <Loader2 className="h-8 w-8 animate-spin text-emerald-400" />
+
+                <p className="font-medium text-emerald-300">
+                  AI Coach is crafting your 7-day plan...
                 </p>
 
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="text-sm text-slate-500">
                   This can take a few seconds.
                 </p>
               </div>
             ) : (
               <button
                 onClick={
-                  handleGeneratePlan
+                  generateFirstPlan
                 }
-                className="mt-8 inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-7 py-3.5 text-sm font-bold text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+                className="mt-8 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-7 py-3 font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700"
               >
-                <Sparkles
-                  size={18}
-                />
+                <Sparkles className="h-5 w-5" />
                 🚀 Generate My First AI Plan
               </button>
             )}
@@ -1259,107 +1130,84 @@ export default function DashboardPage() {
   }
 
   // ==========================================================
-  // Full dashboard
+  // State C — Active plan
   // ==========================================================
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto max-w-7xl p-5 md:p-8">
-        {/* ====================================================
-            Header
-        ==================================================== */}
+      {/* ====================================================
+          Header
+      ==================================================== */}
 
-        <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
-                Dashboard
+      <header className="border-b border-slate-800 bg-slate-950/90">
+        <div className="mx-auto max-w-7xl px-6 py-6 md:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">
+                Welcome,{' '}
+                {user.firstName ||
+                  user.fullName ||
+                  'User'}
               </h1>
 
-              <span className="inline-flex items-center rounded-full bg-indigo-950/60 px-3 py-1 text-sm font-semibold text-indigo-300 ring-1 ring-indigo-500/30">
+              <p className="mt-1 text-slate-400">
+                Your personalized FitAdapt dashboard.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center gap-2 rounded-full border border-indigo-500/20 bg-indigo-500/10 px-4 py-2 text-sm font-semibold text-indigo-300">
+                <Zap className="h-4 w-4" />
                 Active: Week{' '}
-                {currentWeek}
+                {currentWeek ?? '—'}
               </span>
+
+              <button
+                onClick={() =>
+                  signOut({
+                    redirectUrl:
+                      '/sign-in',
+                  })
+                }
+                className="rounded-lg border border-slate-800 bg-slate-900 p-2.5 text-slate-400 transition hover:bg-slate-800 hover:text-white"
+                title="Logout"
+              >
+                <LogOut className="h-5 w-5" />
+              </button>
             </div>
-
-            <p className="mt-1 text-slate-400">
-              Welcome back,{' '}
-              {user.firstName ||
-                user.fullName ||
-                'User'}
-            </p>
           </div>
+        </div>
+      </header>
 
-          <button
-            onClick={() =>
-              signOut()
-            }
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white"
-          >
-            <LogOut
-              size={16}
-            />
-            Logout
-          </button>
-        </header>
+      <main className="mx-auto max-w-7xl px-6 py-8 md:px-8">
+        {/* ==================================================
+            Coach AI Insight
+        ================================================== */}
 
-        {/* ====================================================
-            Error
-        ==================================================== */}
-
-        {error && (
-          <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-950/30 p-4">
-            <X
-              size={18}
-              className="mt-0.5 shrink-0 text-red-400"
-            />
-
-            <div className="text-sm text-red-300">
-              {error}
-            </div>
-
-            <button
-              onClick={() =>
-                setError('')
-              }
-              className="ml-auto text-red-400 hover:text-red-200"
-            >
-              <X size={16} />
-            </button>
-          </div>
-        )}
-
-        {/* ====================================================
-            AI Insight
-        ==================================================== */}
-
-        {latestCheckin?.ai_analysis && (
-          <section className="mb-8 rounded-2xl border border-emerald-500/20 bg-emerald-950/20 p-5 shadow-lg shadow-emerald-950/10">
-            <div className="flex gap-4">
+        {dashboard?.latestReview
+          ?.ai_analysis && (
+          <section className="mb-8 rounded-2xl border border-emerald-500/20 bg-emerald-950/20 p-6 shadow-lg">
+            <div className="flex items-start gap-4">
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10">
-                <Sparkles
-                  size={22}
-                  className="text-emerald-400"
-                />
+                <Sparkles className="h-6 w-6 text-emerald-400" />
               </div>
 
               <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="font-semibold text-emerald-300">
-                    Coach AI Review
-                  </h2>
-
-                  <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-400">
-                    Week{' '}
-                    {
-                      latestCheckin.week_number
-                    }
-                  </span>
-                </div>
-
-                <p className="mt-2 text-sm leading-6 text-slate-300">
+                <p className="text-xs font-bold uppercase tracking-widest text-emerald-400">
+                  Coach AI · Week{' '}
                   {
-                    latestCheckin.ai_analysis
+                    dashboard
+                      .latestReview
+                      .week_number
+                  }{' '}
+                  Review
+                </p>
+
+                <p className="mt-2 leading-7 text-slate-200">
+                  {
+                    dashboard
+                      .latestReview
+                      .ai_analysis
                   }
                 </p>
               </div>
@@ -1367,247 +1215,119 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {/* ====================================================
-            Progress overview
-        ==================================================== */}
-
-        <section className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-slate-400">
-                Workout Progress
-              </span>
-
-              <Dumbbell
-                size={18}
-                className="text-indigo-400"
-              />
-            </div>
-
-            <p className="mt-3 text-2xl font-bold">
-              {
-                completedWorkoutCount
-              }
-              <span className="text-base font-normal text-slate-500">
-                {' '}
-                / 7
-              </span>
-            </p>
-
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-800">
-              <div
-                className="h-full rounded-full bg-indigo-600 transition-all"
-                style={{
-                  width: `${
-                    (completedWorkoutCount /
-                      7) *
-                    100
-                  }%`,
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-slate-400">
-                Diet Progress
-              </span>
-
-              <Utensils
-                size={18}
-                className="text-emerald-400"
-              />
-            </div>
-
-            <p className="mt-3 text-2xl font-bold">
-              {
-                completedDietCount
-              }
-              <span className="text-base font-normal text-slate-500">
-                {' '}
-                / 7
-              </span>
-            </p>
-
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-800">
-              <div
-                className="h-full rounded-full bg-emerald-500 transition-all"
-                style={{
-                  width: `${
-                    (completedDietCount /
-                      7) *
-                    100
-                  }%`,
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-slate-400">
-                Current Weight
-              </span>
-
-              <Target
-                size={18}
-                className="text-amber-400"
-              />
-            </div>
-
-            <p className="mt-3 text-2xl font-bold">
-              {latestCheckin
-                ? formatNumber(
-                    latestCheckin.weight_kg
-                  )
-                : profile?.initial_weight_kg
-                  ? formatNumber(
-                      profile.initial_weight_kg
-                    )
-                  : '—'}
-              <span className="ml-1 text-sm font-normal text-slate-500">
-                kg
-              </span>
-            </p>
-          </div>
-        </section>
-
-        {/* ====================================================
+        {/* ==================================================
             Workout
-        ==================================================== */}
+        ================================================== */}
 
-        {hasWorkout && (
-          <section className="mb-10">
-            <div className="mb-5 flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Dumbbell
-                    size={22}
-                    className="text-indigo-400"
-                  />
-
-                  <h2 className="text-2xl font-bold">
-                    Workout Plan
-                  </h2>
-                </div>
-
-                <p className="mt-1 text-sm text-slate-500">
-                  Week{' '}
-                  {
-                    activeWorkout!.week_number
-                  }{' '}
-                  • Complete each session to track adherence.
-                </p>
-              </div>
+        <section>
+          <div className="mb-5 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/10">
+              <Dumbbell className="h-5 w-5 text-indigo-400" />
             </div>
 
-            <div className="space-y-4">
-              {DAYS.map(
-                (day) => {
-                  const workout =
-                    getWorkoutDay(
-                      workoutPlanData,
+            <div>
+              <h2 className="text-2xl font-bold text-white">
+                Workout Plan
+              </h2>
+
+              <p className="text-sm text-slate-500">
+                Week {currentWeek}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-4">
+            {workoutDays.map(
+              ({
+                day,
+                data,
+              }) => {
+                const expanded =
+                  expandedWorkoutDay ===
+                  day;
+
+                const completed =
+                  Boolean(
+                    workoutActivity[
                       day
-                    );
+                    ]
+                  );
 
-                  const completed =
-                    Boolean(
-                      workoutActivity[
-                        day
-                      ]
-                    );
+                const loadingActivity =
+                  activityLoading ===
+                  `workout-${day}`;
 
-                  const expanded =
-                    expandedWorkoutDay ===
-                    day;
-
-                  const activityKey =
-                    `workout-${day}`;
-
-                  return (
-                    <div
-                      key={day}
-                      className={`overflow-hidden rounded-2xl border bg-slate-900 transition ${
-                        completed
-                          ? 'border-indigo-500/30'
-                          : 'border-slate-800'
-                      }`}
+                return (
+                  <div
+                    key={day}
+                    className={`overflow-hidden rounded-2xl border bg-slate-900 transition ${
+                      completed
+                        ? 'border-emerald-500/30'
+                        : 'border-slate-800'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedWorkoutDay(
+                          expanded
+                            ? null
+                            : day
+                        )
+                      }
+                      className="flex w-full items-center justify-between gap-4 p-5 text-left"
                     >
-                      <div className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setExpandedWorkoutDay(
-                              expanded
-                                ? null
-                                : day
-                            )
-                          }
-                          className="flex min-w-0 items-center gap-4 text-left"
-                        >
-                          <div
-                            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
-                              completed
-                                ? 'bg-indigo-600 text-white'
-                                : 'bg-indigo-500/10 text-indigo-400'
-                            }`}
-                          >
-                            {completed ? (
-                              <Check
-                                size={20}
-                              />
-                            ) : (
-                              <Dumbbell
-                                size={20}
-                              />
-                            )}
-                          </div>
+                      <div>
+                        <div className="flex items-center gap-3">
+                          <h3 className="text-lg font-bold text-white">
+                            {day}
+                          </h3>
 
-                          <div className="min-w-0">
-                            <h3 className="font-bold text-white">
-                              {day}
-                            </h3>
+                          {completed && (
+                            <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-400">
+                              Completed
+                            </span>
+                          )}
+                        </div>
 
-                            <div className="mt-1 flex flex-wrap gap-3 text-xs text-slate-500">
-                              <span className="inline-flex items-center gap-1">
-                                <Target
-                                  size={13}
-                                />
-                                {
-                                  workout.focus
-                                }
-                              </span>
+                        <p className="mt-1 text-sm text-indigo-300">
+                          {data.focus ||
+                            'Training'}
+                        </p>
+                      </div>
 
-                              <span className="inline-flex items-center gap-1">
-                                <Clock3
-                                  size={13}
-                                />
-                                {
-                                  workout.duration_minutes
-                                }{' '}
-                                min
-                              </span>
+                      <div className="flex items-center gap-4">
+                        <span className="hidden items-center gap-1.5 text-sm text-slate-500 sm:flex">
+                          <Clock3 className="h-4 w-4" />
+                          {displayNumber(
+                            data.duration_minutes
+                          )}{' '}
+                          min
+                        </span>
 
-                              <span>
-                                {
-                                  workout
-                                    .exercises
-                                    ?.length ??
-                                  0
-                                }{' '}
-                                exercises
-                              </span>
-                            </div>
-                          </div>
-                        </button>
+                        {expanded ? (
+                          <ChevronUp className="h-5 w-5 text-slate-500" />
+                        ) : (
+                          <ChevronDown className="h-5 w-5 text-slate-500" />
+                        )}
+                      </div>
+                    </button>
 
-                        <div className="flex items-center gap-2">
+                    {expanded && (
+                      <div className="border-t border-slate-800 p-5">
+                        <div className="mb-4 flex items-center justify-between">
+                          <span className="flex items-center gap-2 text-sm text-slate-400">
+                            <Clock3 className="h-4 w-4" />
+                            {displayNumber(
+                              data.duration_minutes
+                            )}{' '}
+                            minutes
+                          </span>
+
                           <button
                             type="button"
                             disabled={
-                              activityLoading ===
-                              activityKey
+                              loadingActivity
                             }
                             onClick={() =>
                               toggleActivity(
@@ -1615,309 +1335,224 @@ export default function DashboardPage() {
                                 day
                               )
                             }
-                            className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                            className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${
                               completed
-                                ? 'bg-indigo-600/20 text-indigo-300 ring-1 ring-indigo-500/30 hover:bg-indigo-600/30'
-                                : 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/10 hover:bg-indigo-500'
-                            }`}
+                                ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+                                : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                            } disabled:cursor-not-allowed disabled:opacity-60`}
                           >
-                            {activityLoading ===
-                            activityKey ? (
-                              <RefreshCw
-                                size={15}
-                                className="animate-spin"
-                              />
+                            {loadingActivity ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
-                              <Check
-                                size={15}
-                              />
+                              <Check className="h-4 w-4" />
                             )}
 
                             {completed
                               ? 'Completed'
                               : 'Mark Workout Complete'}
                           </button>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setExpandedWorkoutDay(
-                                expanded
-                                  ? null
-                                  : day
-                              )
-                            }
-                            className="rounded-lg border border-slate-700 p-2 text-slate-400 hover:bg-slate-800 hover:text-white"
-                            aria-label={`Toggle ${day}`}
-                          >
-                            {expanded ? (
-                              <ChevronUp
-                                size={18}
-                              />
-                            ) : (
-                              <ChevronDown
-                                size={18}
-                              />
-                            )}
-                          </button>
                         </div>
-                      </div>
 
-                      {expanded && (
-                        <div className="border-t border-slate-800 p-5">
-                          {workout
-                            .exercises
-                            ?.length ? (
-                            <div className="space-y-3">
-                              {workout.exercises.map(
-                                (
-                                  exercise,
-                                  index
-                                ) => (
-                                  <div
-                                    key={`${day}-${index}`}
-                                    className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"
-                                  >
-                                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                                      <div>
-                                        <h4 className="font-semibold text-white">
-                                          {exercise.name ||
-                                            exercise.exercise ||
-                                            `Exercise ${index + 1}`}
-                                        </h4>
+                        {data.exercises &&
+                        data.exercises.length >
+                          0 ? (
+                          <div className="space-y-3">
+                            {data.exercises.map(
+                              (
+                                exercise,
+                                index
+                              ) => (
+                                <div
+                                  key={`${day}-${index}`}
+                                  className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"
+                                >
+                                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                    <div>
+                                      <h4 className="font-semibold text-white">
+                                        {exercise.name ||
+                                          exercise.exercise ||
+                                          `Exercise ${index + 1}`}
+                                      </h4>
 
-                                        {exercise.notes && (
-                                          <p className="mt-1 text-sm leading-5 text-slate-500">
-                                            {
-                                              exercise.notes
-                                            }
-                                          </p>
-                                        )}
+                                      {exercise.notes && (
+                                        <p className="mt-1 text-sm leading-6 text-slate-500">
+                                          {
+                                            exercise.notes
+                                          }
+                                        </p>
+                                      )}
+                                    </div>
+
+                                    <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                                      <div className="rounded-lg bg-slate-900 px-3 py-2">
+                                        <p className="text-slate-500">
+                                          Sets
+                                        </p>
+                                        <p className="mt-1 font-bold text-white">
+                                          {exercise.sets ??
+                                            '—'}
+                                        </p>
                                       </div>
 
-                                      <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                                        <div className="rounded-lg bg-slate-900 px-3 py-2">
-                                          <p className="text-slate-500">
-                                            Sets
-                                          </p>
-                                          <p className="mt-0.5 font-semibold text-indigo-300">
-                                            {formatNumber(
-                                              exercise.sets,
-                                              '—'
-                                            )}
-                                          </p>
-                                        </div>
+                                      <div className="rounded-lg bg-slate-900 px-3 py-2">
+                                        <p className="text-slate-500">
+                                          Reps
+                                        </p>
+                                        <p className="mt-1 font-bold text-white">
+                                          {exercise.reps ??
+                                            '—'}
+                                        </p>
+                                      </div>
 
-                                        <div className="rounded-lg bg-slate-900 px-3 py-2">
-                                          <p className="text-slate-500">
-                                            Reps
-                                          </p>
-                                          <p className="mt-0.5 font-semibold text-indigo-300">
-                                            {exercise.reps ??
-                                              '—'}
-                                          </p>
-                                        </div>
-
-                                        <div className="rounded-lg bg-slate-900 px-3 py-2">
-                                          <p className="text-slate-500">
-                                            Rest
-                                          </p>
-                                          <p className="mt-0.5 font-semibold text-indigo-300">
-                                            {exercise.rest_seconds ??
-                                              exercise.rest ??
-                                              '—'}
-                                            {exercise.rest_seconds ||
-                                            exercise.rest
-                                              ? 's'
-                                              : ''}
-                                          </p>
-                                        </div>
+                                      <div className="rounded-lg bg-slate-900 px-3 py-2">
+                                        <p className="text-slate-500">
+                                          Rest
+                                        </p>
+                                        <p className="mt-1 font-bold text-white">
+                                          {exercise.rest_seconds ??
+                                            exercise.rest ??
+                                            '—'}
+                                          s
+                                        </p>
                                       </div>
                                     </div>
                                   </div>
-                                )
-                              )}
-                            </div>
-                          ) : (
-                            <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-5 text-center text-sm text-slate-500">
-                              No exercises were provided for this day.
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
-              )}
-            </div>
-          </section>
-        )}
-
-        {/* ====================================================
-            Diet
-        ==================================================== */}
-
-        {hasDiet && (
-          <section className="mb-10">
-            <div className="mb-5 flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Utensils
-                    size={22}
-                    className="text-emerald-400"
-                  />
-
-                  <h2 className="text-2xl font-bold">
-                    Diet Plan
-                  </h2>
-                </div>
-
-                <p className="mt-1 text-sm text-slate-500">
-                  Week{' '}
-                  {
-                    activeDiet!.week_number
-                  }{' '}
-                  • Track your daily nutrition adherence.
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {DAYS.map(
-                (day) => {
-                  const diet =
-                    getDietDay(
-                      dietPlanData,
-                      day
-                    );
-
-                  const completed =
-                    Boolean(
-                      dietActivity[
-                        day
-                      ]
-                    );
-
-                  const expanded =
-                    expandedDietDay ===
-                    day;
-
-                  const activityKey =
-                    `diet-${day}`;
-
-                  const meals = [
-                    {
-                      title:
-                        'Breakfast',
-                      items:
-                        normalizeMeals(
-                          diet.breakfast
-                        ),
-                    },
-                    {
-                      title:
-                        'Lunch',
-                      items:
-                        normalizeMeals(
-                          diet.lunch
-                        ),
-                    },
-                    {
-                      title:
-                        'Dinner',
-                      items:
-                        normalizeMeals(
-                          diet.dinner
-                        ),
-                    },
-                    {
-                      title:
-                        'Snacks',
-                      items:
-                        normalizeMeals(
-                          diet.snacks
-                        ),
-                    },
-                  ];
-
-                  return (
-                    <div
-                      key={day}
-                      className={`overflow-hidden rounded-2xl border bg-slate-900 transition ${
-                        completed
-                          ? 'border-emerald-500/30'
-                          : 'border-slate-800'
-                      }`}
-                    >
-                      <div className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setExpandedDietDay(
-                              expanded
-                                ? null
-                                : day
-                            )
-                          }
-                          className="flex min-w-0 items-center gap-4 text-left"
-                        >
-                          <div
-                            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
-                              completed
-                                ? 'bg-emerald-600 text-white'
-                                : 'bg-emerald-500/10 text-emerald-400'
-                            }`}
-                          >
-                            {completed ? (
-                              <Check
-                                size={20}
-                              />
-                            ) : (
-                              <Utensils
-                                size={20}
-                              />
+                                </div>
+                              )
                             )}
                           </div>
-
-                          <div className="min-w-0">
-                            <h3 className="font-bold text-white">
-                              {day}
-                            </h3>
-
-                            <div className="mt-1 flex flex-wrap gap-3 text-xs text-slate-500">
-                              <span className="inline-flex items-center gap-1">
-                                <Flame
-                                  size={13}
-                                />
-                                {formatNumber(
-                                  diet.daily_total_calories ??
-                                    diet.total_calories,
-                                  '0'
-                                )}{' '}
-                                kcal
-                              </span>
-
-                              <span className="inline-flex items-center gap-1">
-                                <Zap
-                                  size={13}
-                                />
-                                {formatNumber(
-                                  diet.daily_total_protein_g ??
-                                    diet.total_protein_g,
-                                  '0'
-                                )}
-                                g protein
-                              </span>
-                            </div>
+                        ) : (
+                          <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-5 text-center text-sm text-slate-500">
+                            No exercises scheduled for this day.
                           </div>
-                        </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+            )}
+          </div>
+        </section>
 
-                        <div className="flex items-center gap-2">
+        {/* ==================================================
+            Diet
+        ================================================== */}
+
+        <section className="mt-12">
+          <div className="mb-5 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10">
+              <Utensils className="h-5 w-5 text-emerald-400" />
+            </div>
+
+            <div>
+              <h2 className="text-2xl font-bold text-white">
+                Diet Plan
+              </h2>
+
+              <p className="text-sm text-slate-500">
+                Week {currentWeek}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-4">
+            {dietDays.map(
+              ({
+                day,
+                data,
+              }) => {
+                const expanded =
+                  expandedDietDay ===
+                  day;
+
+                const completed =
+                  Boolean(
+                    dietActivity[
+                      day
+                    ]
+                  );
+
+                const loadingActivity =
+                  activityLoading ===
+                  `diet-${day}`;
+
+                const totalCalories =
+                  data.daily_total_calories ??
+                  data.total_calories ??
+                  0;
+
+                const totalProtein =
+                  data.daily_total_protein_g ??
+                  data.total_protein_g ??
+                  0;
+
+                return (
+                  <div
+                    key={day}
+                    className={`overflow-hidden rounded-2xl border bg-slate-900 transition ${
+                      completed
+                        ? 'border-emerald-500/30'
+                        : 'border-slate-800'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedDietDay(
+                          expanded
+                            ? null
+                            : day
+                        )
+                      }
+                      className="flex w-full items-center justify-between gap-4 p-5 text-left"
+                    >
+                      <div>
+                        <div className="flex items-center gap-3">
+                          <h3 className="text-lg font-bold text-white">
+                            {day}
+                          </h3>
+
+                          {completed && (
+                            <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-400">
+                              Completed
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="mt-2 flex flex-wrap gap-3 text-xs">
+                          <span className="inline-flex items-center gap-1.5 text-orange-400">
+                            <Flame className="h-4 w-4" />
+                            {displayNumber(
+                              totalCalories
+                            )}{' '}
+                            kcal
+                          </span>
+
+                          <span className="inline-flex items-center gap-1.5 text-emerald-400">
+                            <Zap className="h-4 w-4" />
+                            {displayNumber(
+                              totalProtein
+                            )}
+                            g protein
+                          </span>
+                        </div>
+                      </div>
+
+                      {expanded ? (
+                        <ChevronUp className="h-5 w-5 shrink-0 text-slate-500" />
+                      ) : (
+                        <ChevronDown className="h-5 w-5 shrink-0 text-slate-500" />
+                      )}
+                    </button>
+
+                    {expanded && (
+                      <div className="border-t border-slate-800 p-5">
+                        <div className="mb-5 flex justify-end">
                           <button
                             type="button"
                             disabled={
-                              activityLoading ===
-                              activityKey
+                              loadingActivity
                             }
                             onClick={() =>
                               toggleActivity(
@@ -1925,255 +1560,217 @@ export default function DashboardPage() {
                                 day
                               )
                             }
-                            className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                            className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${
                               completed
-                                ? 'bg-emerald-600/20 text-emerald-300 ring-1 ring-emerald-500/30 hover:bg-emerald-600/30'
-                                : 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/10 hover:bg-emerald-500'
-                            }`}
+                                ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+                                : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                            } disabled:cursor-not-allowed disabled:opacity-60`}
                           >
-                            {activityLoading ===
-                            activityKey ? (
-                              <RefreshCw
-                                size={15}
-                                className="animate-spin"
-                              />
+                            {loadingActivity ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
-                              <Check
-                                size={15}
-                              />
+                              <Check className="h-4 w-4" />
                             )}
 
                             {completed
                               ? 'Completed'
                               : 'Mark Diet Complete'}
                           </button>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setExpandedDietDay(
-                                expanded
-                                  ? null
-                                  : day
-                              )
-                            }
-                            className="rounded-lg border border-slate-700 p-2 text-slate-400 hover:bg-slate-800 hover:text-white"
-                            aria-label={`Toggle ${day}`}
-                          >
-                            {expanded ? (
-                              <ChevronUp
-                                size={18}
-                              />
-                            ) : (
-                              <ChevronDown
-                                size={18}
-                              />
-                            )}
-                          </button>
                         </div>
-                      </div>
 
-                      {expanded && (
-                        <div className="border-t border-slate-800 p-5">
-                          <div className="grid gap-4 md:grid-cols-2">
-                            {meals.map(
-                              (
-                                mealGroup
-                              ) => (
-                                <div
-                                  key={
-                                    mealGroup.title
-                                  }
-                                  className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"
-                                >
-                                  <h4 className="mb-3 flex items-center gap-2 font-semibold text-emerald-300">
-                                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                    {
-                                      mealGroup.title
-                                    }
-                                  </h4>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          {[
+                            {
+                              title:
+                                'Breakfast',
+                              meals:
+                                normalizeMeals(
+                                  data.breakfast
+                                ),
+                            },
+                            {
+                              title:
+                                'Lunch',
+                              meals:
+                                normalizeMeals(
+                                  data.lunch
+                                ),
+                            },
+                            {
+                              title:
+                                'Dinner',
+                              meals:
+                                normalizeMeals(
+                                  data.dinner
+                                ),
+                            },
+                            {
+                              title:
+                                'Snacks',
+                              meals:
+                                normalizeMeals(
+                                  data.snacks
+                                ),
+                            },
+                          ].map(
+                            ({
+                              title,
+                              meals,
+                            }) => (
+                              <div
+                                key={title}
+                                className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"
+                              >
+                                <h4 className="font-semibold text-white">
+                                  {title}
+                                </h4>
 
-                                  {mealGroup
-                                    .items
-                                    .length >
-                                  0 ? (
-                                    <div className="space-y-2">
-                                      {mealGroup.items.map(
-                                        (
-                                          meal,
-                                          index
-                                        ) => (
-                                          <div
-                                            key={`${mealGroup.title}-${index}`}
-                                            className="flex items-start justify-between gap-4 rounded-lg bg-slate-900 p-3"
-                                          >
-                                            <div className="min-w-0">
-                                              <p className="text-sm font-medium text-slate-200">
-                                                {mealName(
+                                {meals.length >
+                                0 ? (
+                                  <div className="mt-3 space-y-3">
+                                    {meals.map(
+                                      (
+                                        meal,
+                                        index
+                                      ) => (
+                                        <div
+                                          key={`${title}-${index}`}
+                                          className="rounded-lg bg-slate-900 p-3"
+                                        >
+                                          <p className="text-sm font-medium text-slate-200">
+                                            {getMealName(
+                                              meal
+                                            )}
+                                          </p>
+
+                                          <div className="mt-2 flex gap-4 text-xs">
+                                            <span className="text-orange-400">
+                                              {
+                                                getMealCalories(
                                                   meal
-                                                )}
-                                              </p>
+                                                )
+                                              }{' '}
+                                              kcal
+                                            </span>
 
-                                              {meal.notes && (
-                                                <p className="mt-1 text-xs text-slate-500">
-                                                  {
-                                                    (
-                                                      meal as any
-                                                    )
-                                                      .notes
-                                                  }
-                                                </p>
-                                              )}
-                                            </div>
-
-                                            <div className="shrink-0 text-right text-xs">
-                                              <p className="text-slate-400">
-                                                {formatNumber(
-                                                  mealCalories(
-                                                    meal
-                                                  )
-                                                )}{' '}
-                                                kcal
-                                              </p>
-
-                                              <p className="mt-0.5 text-emerald-400">
-                                                {formatNumber(
-                                                  mealProtein(
-                                                    meal
-                                                  )
-                                                )}
-                                                g
-                                                {' '}
-                                                protein
-                                              </p>
-                                            </div>
+                                            <span className="text-emerald-400">
+                                              {
+                                                getMealProtein(
+                                                  meal
+                                                )
+                                              }
+                                              g protein
+                                            </span>
                                           </div>
-                                        )
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <p className="text-sm text-slate-600">
-                                      No items listed.
-                                    </p>
-                                  )}
-                                </div>
-                              )
-                            )}
+                                        </div>
+                                      )
+                                    )}
+                                  </div>
+                                ) : (
+                                  <p className="mt-3 text-sm text-slate-500">
+                                    No items listed.
+                                  </p>
+                                )}
+                              </div>
+                            )
+                          )}
+                        </div>
+
+                        <div className="mt-5 grid grid-cols-2 gap-3">
+                          <div className="rounded-xl border border-orange-500/10 bg-orange-500/5 p-4">
+                            <p className="text-xs text-slate-500">
+                              Daily Calories
+                            </p>
+
+                            <p className="mt-1 text-xl font-bold text-orange-400">
+                              {displayNumber(
+                                totalCalories
+                              )}{' '}
+                              kcal
+                            </p>
+                          </div>
+
+                          <div className="rounded-xl border border-emerald-500/10 bg-emerald-500/5 p-4">
+                            <p className="text-xs text-slate-500">
+                              Daily Protein
+                            </p>
+
+                            <p className="mt-1 text-xl font-bold text-emerald-400">
+                              {displayNumber(
+                                totalProtein
+                              )}
+                              g
+                            </p>
                           </div>
                         </div>
-                      )}
-                    </div>
-                  );
-                }
-              )}
-            </div>
-          </section>
-        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+            )}
+          </div>
+        </section>
 
-        {/* ====================================================
-            Missing one plan
-        ==================================================== */}
+        {/* ==================================================
+            Weekly Review
+        ================================================== */}
 
-        {!hasWorkout ||
-          (!hasDiet && (
-            <section className="mb-10 rounded-2xl border border-amber-500/20 bg-amber-950/10 p-5">
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <h3 className="font-semibold text-amber-300">
-                    Your plan is incomplete
-                  </h3>
+        <section className="mt-12 pb-12">
+          <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-6 text-center">
+            <Sparkles className="mx-auto h-8 w-8 text-indigo-400" />
 
-                  <p className="mt-1 text-sm text-slate-500">
-                    One of your active plans is missing.
-                    Generate a new plan to restore it.
-                  </p>
-                </div>
-
-                <button
-                  onClick={
-                    handleGeneratePlan
-                  }
-                  disabled={
-                    generatingPlan
-                  }
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
-                >
-                  {generatingPlan ? (
-                    <RefreshCw
-                      size={16}
-                      className="animate-spin"
-                    />
-                  ) : (
-                    <Sparkles
-                      size={16}
-                    />
-                  )}
-                  Generate Plan
-                </button>
-              </div>
-            </section>
-          ))}
-
-        {/* ====================================================
-            Weekly review
-        ==================================================== */}
-
-        <section className="mt-12 border-t border-slate-800 pt-8">
-          <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/10 p-6 text-center">
-            <Sparkles
-              size={28}
-              className="mx-auto text-indigo-400"
-            />
-
-            <h2 className="mt-3 text-xl font-bold">
-              Ready to review your week?
+            <h2 className="mt-3 text-xl font-bold text-white">
+              Ready to review this week?
             </h2>
 
-            <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">
-              Your feedback helps the AI coach adjust
-              your next workout and diet plan.
+            <p className="mt-2 text-sm text-slate-400">
+              Your feedback helps the AI Coach adjust your next week.
             </p>
 
             <button
+              type="button"
               onClick={() => {
                 setSubmitError('');
-                setModalOpen(
-                  true
-                );
+                setModalOpen(true);
               }}
-              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-500"
+              className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-7 py-3 font-semibold text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-700"
             >
               🏁 Complete Week{' '}
-              {currentWeek} & Review
+              {currentWeek ?? ''}{' '}
+              & Review
             </button>
           </div>
         </section>
-      </div>
+      </main>
 
-      {/* ======================================================
+      {/* ====================================================
           Weekly Review Modal
-      ====================================================== */}
+      ==================================================== */}
 
       {modalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="weekly-review-title"
+          onMouseDown={(event) => {
+            if (
+              event.target ===
+              event.currentTarget
+            ) {
+              if (!submittingReview) {
+                setModalOpen(false);
+              }
+            }
+          }}
         >
-          <div className="my-auto w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl md:p-7">
-            <div className="flex items-start justify-between gap-4">
+          <div className="my-8 w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 p-6">
               <div>
-                <h2
-                  id="weekly-review-title"
-                  className="text-2xl font-bold text-white"
-                >
+                <h2 className="text-xl font-bold text-white">
                   Weekly Check-In
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Review Week{' '}
-                  {currentWeek} before your AI coach creates the next week.
+                  Week {currentWeek} review
                 </p>
               </div>
 
@@ -2183,26 +1780,24 @@ export default function DashboardPage() {
                   submittingReview
                 }
                 onClick={() =>
-                  setModalOpen(
-                    false
-                  )
+                  setModalOpen(false)
                 }
                 className="rounded-lg p-2 text-slate-500 hover:bg-slate-800 hover:text-white"
               >
-                <X size={20} />
+                <X className="h-5 w-5" />
               </button>
             </div>
 
             <form
               onSubmit={
-                handleReviewSubmit
+                submitWeeklyReview
               }
-              className="mt-6 space-y-5"
+              className="space-y-5 p-6"
             >
               {/* Weight */}
 
               <div>
-                <label className="block text-sm font-semibold text-slate-300">
+                <label className="text-sm font-medium text-slate-300">
                   Current Weight (kg)
                 </label>
 
@@ -2216,9 +1811,7 @@ export default function DashboardPage() {
                   }
                   onChange={(event) =>
                     setFormData(
-                      (
-                        previous
-                      ) => ({
+                      (previous) => ({
                         ...previous,
                         weight_kg:
                           event
@@ -2227,15 +1820,15 @@ export default function DashboardPage() {
                       })
                     )
                   }
-                  placeholder="e.g. 65.5"
-                  className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-white outline-none focus:border-indigo-500"
+                  placeholder="e.g. 70.5"
                 />
               </div>
 
               {/* Difficulty */}
 
               <div>
-                <label className="block text-sm font-semibold text-slate-300">
+                <label className="text-sm font-medium text-slate-300">
                   Workout Difficulty
                 </label>
 
@@ -2245,9 +1838,7 @@ export default function DashboardPage() {
                   }
                   onChange={(event) =>
                     setFormData(
-                      (
-                        previous
-                      ) => ({
+                      (previous) => ({
                         ...previous,
                         workout_difficulty:
                           event
@@ -2256,7 +1847,7 @@ export default function DashboardPage() {
                       })
                     )
                   }
-                  className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-white outline-none focus:border-indigo-500"
                 >
                   <option value="Too Easy">
                     Too Easy
@@ -2275,34 +1866,30 @@ export default function DashboardPage() {
               {/* Energy */}
 
               <div>
-                <label className="block text-sm font-semibold text-slate-300">
+                <label className="text-sm font-medium text-slate-300">
                   Energy Level
                 </label>
 
-                <div className="mt-2 grid grid-cols-5 gap-2">
+                <div className="mt-2 flex gap-2">
                   {[1, 2, 3, 4, 5].map(
                     (number) => (
                       <button
-                        key={
-                          number
-                        }
+                        key={number}
                         type="button"
                         onClick={() =>
                           setFormData(
-                            (
-                              previous
-                            ) => ({
+                            (previous) => ({
                               ...previous,
                               energy_rating:
                                 number,
                             })
                           )
                         }
-                        className={`rounded-xl py-3 text-sm font-bold transition ${
+                        className={`h-11 w-11 rounded-full text-sm font-bold transition ${
                           formData.energy_rating ===
                           number
-                            ? 'bg-indigo-600 text-white ring-2 ring-indigo-400/50'
-                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
+                            ? 'bg-indigo-600 text-white ring-2 ring-indigo-400 ring-offset-2 ring-offset-slate-900'
+                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
                         }`}
                       >
                         {number}
@@ -2310,17 +1897,13 @@ export default function DashboardPage() {
                     )
                   )}
                 </div>
-
-                <p className="mt-2 text-xs text-slate-600">
-                  1 = very low energy • 5 = excellent energy
-                </p>
               </div>
 
               {/* Notes */}
 
               <div>
-                <label className="block text-sm font-semibold text-slate-300">
-                  Notes / Feedback
+                <label className="text-sm font-medium text-slate-300">
+                  Feedback / Notes
                 </label>
 
                 <textarea
@@ -2330,9 +1913,7 @@ export default function DashboardPage() {
                   }
                   onChange={(event) =>
                     setFormData(
-                      (
-                        previous
-                      ) => ({
+                      (previous) => ({
                         ...previous,
                         user_notes:
                           event
@@ -2341,33 +1922,31 @@ export default function DashboardPage() {
                       })
                     )
                   }
-                  placeholder="How did the week feel? What should the AI coach know?"
-                  className="mt-2 w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  className="mt-2 w-full resize-none rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-white outline-none focus:border-indigo-500"
+                  placeholder="How did the week feel? What should the AI Coach know?"
                 />
               </div>
 
               {/* Error */}
 
               {submitError && (
-                <div className="rounded-xl border border-red-500/30 bg-red-950/30 p-3 text-sm text-red-300">
+                <div className="rounded-lg border border-red-900/50 bg-red-950/30 p-3 text-sm text-red-300">
                   {submitError}
                 </div>
               )}
 
-              {/* Buttons */}
+              {/* Actions */}
 
-              <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
+              <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
                   disabled={
                     submittingReview
                   }
                   onClick={() =>
-                    setModalOpen(
-                      false
-                    )
+                    setModalOpen(false)
                   }
-                  className="rounded-xl border border-slate-700 px-5 py-3 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 disabled:opacity-50"
+                  className="rounded-lg border border-slate-700 px-5 py-2.5 text-sm font-semibold text-slate-300 hover:bg-slate-800 disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -2377,21 +1956,16 @@ export default function DashboardPage() {
                   disabled={
                     submittingReview
                   }
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {submittingReview ? (
                     <>
-                      <RefreshCw
-                        size={17}
-                        className="animate-spin"
-                      />
+                      <Loader2 className="h-4 w-4 animate-spin" />
                       AI Coach is analyzing...
                     </>
                   ) : (
                     <>
-                      <Sparkles
-                        size={17}
-                      />
+                      <Sparkles className="h-4 w-4" />
                       Submit Review
                     </>
                   )}
