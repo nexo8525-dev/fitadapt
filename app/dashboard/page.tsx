@@ -192,13 +192,6 @@ function getPlanDays<T>(
     return {};
   }
 
-  // Normal structure:
-  //
-  // {
-  //   Monday: {...},
-  //   Tuesday: {...}
-  // }
-
   const hasDays = DAYS.some(
     (day) =>
       Object.prototype.hasOwnProperty.call(
@@ -211,14 +204,6 @@ function getPlanDays<T>(
     return planData as Record<string, T>;
   }
 
-  // Defensive support for:
-  //
-  // {
-  //   workout: {
-  //      Monday: {...}
-  //   }
-  // }
-
   if (
     isObject(planData.workout) &&
     DAYS.some((day) =>
@@ -228,19 +213,8 @@ function getPlanDays<T>(
       )
     )
   ) {
-    return planData.workout as Record<
-      string,
-      T
-    >;
+    return planData.workout as Record<string, T>;
   }
-
-  // Defensive support for:
-  //
-  // {
-  //   diet: {
-  //      Monday: {...}
-  //   }
-  // }
 
   if (
     isObject(planData.diet) &&
@@ -251,10 +225,7 @@ function getPlanDays<T>(
       )
     )
   ) {
-    return planData.diet as Record<
-      string,
-      T
-    >;
+    return planData.diet as Record<string, T>;
   }
 
   return {};
@@ -471,6 +442,23 @@ export default function DashboardPage() {
     });
 
   // ==========================================================
+  // Logout
+  // ==========================================================
+
+  const handleLogout = async () => {
+    try {
+      await signOut({
+        redirectUrl: '/login',
+      });
+    } catch (error) {
+      console.error(
+        'Logout error:',
+        error
+      );
+    }
+  };
+
+  // ==========================================================
   // Fetch dashboard
   // ==========================================================
 
@@ -519,7 +507,6 @@ export default function DashboardPage() {
           )
         );
 
-        // Prefill weight
         if (
           result.latestReview
             ?.weight_kg
@@ -620,7 +607,6 @@ export default function DashboardPage() {
           );
         }
 
-        // Reload dashboard data
         await fetchDashboard();
       } catch (err: any) {
         console.error(
@@ -669,7 +655,6 @@ export default function DashboardPage() {
 
     setActivityLoading(key);
 
-    // Optimistic UI
     if (type === 'workout') {
       setWorkoutActivity(
         (previous) => ({
@@ -720,7 +705,6 @@ export default function DashboardPage() {
         err
       );
 
-      // Roll back optimistic update
       if (type === 'workout') {
         setWorkoutActivity(
           (previous) => ({
@@ -983,12 +967,8 @@ export default function DashboardPage() {
           </div>
 
           <button
-            onClick={() =>
-              signOut({
-                redirectUrl:
-                  '/sign-in',
-              })
-            }
+            type="button"
+            onClick={handleLogout}
             className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
           >
             <LogOut className="mr-2 inline h-4 w-4" />
@@ -1065,12 +1045,8 @@ export default function DashboardPage() {
           </div>
 
           <button
-            onClick={() =>
-              signOut({
-                redirectUrl:
-                  '/sign-in',
-              })
-            }
+            type="button"
+            onClick={handleLogout}
             className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
           >
             <LogOut className="mr-2 inline h-4 w-4" />
@@ -1135,10 +1111,6 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      {/* ====================================================
-          Header
-      ==================================================== */}
-
       <header className="border-b border-slate-800 bg-slate-950/90">
         <div className="mx-auto max-w-7xl px-6 py-6 md:px-8">
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -1163,14 +1135,11 @@ export default function DashboardPage() {
               </span>
 
               <button
-                onClick={() =>
-                  signOut({
-                    redirectUrl:
-                      '/sign-in',
-                  })
-                }
+                type="button"
+                onClick={handleLogout}
                 className="rounded-lg border border-slate-800 bg-slate-900 p-2.5 text-slate-400 transition hover:bg-slate-800 hover:text-white"
                 title="Logout"
+                aria-label="Logout"
               >
                 <LogOut className="h-5 w-5" />
               </button>
@@ -1180,10 +1149,6 @@ export default function DashboardPage() {
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-8 md:px-8">
-        {/* ==================================================
-            Coach AI Insight
-        ================================================== */}
-
         {dashboard?.latestReview
           ?.ai_analysis && (
           <section className="mb-8 rounded-2xl border border-emerald-500/20 bg-emerald-950/20 p-6 shadow-lg">
@@ -1215,10 +1180,7 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {/* ==================================================
-            Workout
-        ================================================== */}
-
+        {/* Workout */}
         <section>
           <div className="mb-5 flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/10">
@@ -1435,10 +1397,7 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* ==================================================
-            Diet
-        ================================================== */}
-
+        {/* Diet */}
         <section className="mt-12">
           <div className="mb-5 flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10">
@@ -1712,10 +1671,7 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* ==================================================
-            Weekly Review
-        ================================================== */}
-
+        {/* Weekly Review */}
         <section className="mt-12 pb-12">
           <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-6 text-center">
             <Sparkles className="mx-auto h-8 w-8 text-indigo-400" />
@@ -1744,9 +1700,7 @@ export default function DashboardPage() {
         </section>
       </main>
 
-      {/* ====================================================
-          Weekly Review Modal
-      ==================================================== */}
+      {/* Weekly Review Modal */}
 
       {modalOpen && (
         <div
@@ -1794,8 +1748,6 @@ export default function DashboardPage() {
               }
               className="space-y-5 p-6"
             >
-              {/* Weight */}
-
               <div>
                 <label className="text-sm font-medium text-slate-300">
                   Current Weight (kg)
@@ -1824,8 +1776,6 @@ export default function DashboardPage() {
                   placeholder="e.g. 70.5"
                 />
               </div>
-
-              {/* Difficulty */}
 
               <div>
                 <label className="text-sm font-medium text-slate-300">
@@ -1863,8 +1813,6 @@ export default function DashboardPage() {
                 </select>
               </div>
 
-              {/* Energy */}
-
               <div>
                 <label className="text-sm font-medium text-slate-300">
                   Energy Level
@@ -1899,8 +1847,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Notes */}
-
               <div>
                 <label className="text-sm font-medium text-slate-300">
                   Feedback / Notes
@@ -1927,15 +1873,11 @@ export default function DashboardPage() {
                 />
               </div>
 
-              {/* Error */}
-
               {submitError && (
                 <div className="rounded-lg border border-red-900/50 bg-red-950/30 p-3 text-sm text-red-300">
                   {submitError}
                 </div>
               )}
-
-              {/* Actions */}
 
               <div className="flex justify-end gap-3 pt-2">
                 <button
