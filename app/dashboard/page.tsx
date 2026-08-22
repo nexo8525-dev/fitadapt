@@ -24,7 +24,10 @@ import {
   Zap,
 } from 'lucide-react';
 
-import { useUser } from '@clerk/nextjs';
+import {
+  useClerk,
+  useUser,
+} from '@clerk/nextjs';
 
 // ============================================================
 // Types
@@ -38,13 +41,24 @@ type WorkoutDifficulty =
 interface Profile {
   id: string;
   clerk_user_id: string;
+
   initial_weight_kg?: number | null;
+  weight_kg?: number | null;
+
   age?: number | null;
   height_cm?: number | null;
+
   goal?: string | null;
+  fitness_goal?: string | null;
+
   equipment?: string | null;
+  workout_location?: string | null;
+
   diet_preference?: string | null;
+  dietary_preference?: string | null;
+
   budget?: number | null;
+  diet_budget_per_month?: number | null;
 }
 
 interface WorkoutPlan {
@@ -213,7 +227,10 @@ function getPlanDays<T>(
       )
     )
   ) {
-    return planData.workout as Record<string, T>;
+    return planData.workout as Record<
+      string,
+      T
+    >;
   }
 
   if (
@@ -225,7 +242,10 @@ function getPlanDays<T>(
       )
     )
   ) {
-    return planData.diet as Record<string, T>;
+    return planData.diet as Record<
+      string,
+      T
+    >;
   }
 
   return {};
@@ -365,15 +385,22 @@ function buildActivityMap(
 // ============================================================
 
 export default function DashboardPage() {
+  // ==========================================================
+  // Clerk
+  // ==========================================================
+
   const {
     user,
     isLoaded: isUserLoaded,
-    signOut,
   } = useUser();
 
-  // ----------------------------------------------------------
+  // IMPORTANT:
+  // signOut comes from useClerk(), NOT useUser().
+  const { signOut } = useClerk();
+
+  // ==========================================================
   // Dashboard state
-  // ----------------------------------------------------------
+  // ==========================================================
 
   const [loading, setLoading] =
     useState(true);
@@ -386,9 +413,9 @@ export default function DashboardPage() {
       null
     );
 
-  // ----------------------------------------------------------
+  // ==========================================================
   // Generate plan state
-  // ----------------------------------------------------------
+  // ==========================================================
 
   const [generatingPlan, setGeneratingPlan] =
     useState(false);
@@ -396,9 +423,9 @@ export default function DashboardPage() {
   const [generateError, setGenerateError] =
     useState('');
 
-  // ----------------------------------------------------------
+  // ==========================================================
   // Activity state
-  // ----------------------------------------------------------
+  // ==========================================================
 
   const [workoutActivity, setWorkoutActivity] =
     useState<ActivityMap>({});
@@ -409,9 +436,9 @@ export default function DashboardPage() {
   const [activityLoading, setActivityLoading] =
     useState<string | null>(null);
 
-  // ----------------------------------------------------------
+  // ==========================================================
   // Expanded cards
-  // ----------------------------------------------------------
+  // ==========================================================
 
   const [expandedWorkoutDay, setExpandedWorkoutDay] =
     useState<string | null>('Monday');
@@ -419,9 +446,9 @@ export default function DashboardPage() {
   const [expandedDietDay, setExpandedDietDay] =
     useState<string | null>('Monday');
 
-  // ----------------------------------------------------------
+  // ==========================================================
   // Review modal
-  // ----------------------------------------------------------
+  // ==========================================================
 
   const [modalOpen, setModalOpen] =
     useState(false);
@@ -455,6 +482,9 @@ export default function DashboardPage() {
         'Logout error:',
         error
       );
+
+      // Fallback navigation if redirect handling fails.
+      window.location.href = '/login';
     }
   };
 
@@ -507,9 +537,10 @@ export default function DashboardPage() {
           )
         );
 
+        // Prefill weight from latest check-in.
         if (
           result.latestReview
-            ?.weight_kg
+            ?.weight_kg != null
         ) {
           setFormData(
             (previous) => ({
@@ -522,7 +553,10 @@ export default function DashboardPage() {
                 ),
             })
           );
-        } else if (
+        }
+
+        // Otherwise use onboarding weight.
+        else if (
           result.profile
             ?.initial_weight_kg !=
           null
@@ -535,6 +569,25 @@ export default function DashboardPage() {
                   result
                     .profile!
                     .initial_weight_kg
+                ),
+            })
+          );
+        }
+
+        // Compatibility with profile schema
+        // using weight_kg instead of initial_weight_kg.
+        else if (
+          result.profile
+            ?.weight_kg != null
+        ) {
+          setFormData(
+            (previous) => ({
+              ...previous,
+              weight_kg:
+                String(
+                  result
+                    .profile!
+                    .weight_kg
                 ),
             })
           );
@@ -561,12 +614,14 @@ export default function DashboardPage() {
   // ==========================================================
 
   useEffect(() => {
-    if (isUserLoaded) {
-      if (user) {
-        fetchDashboard();
-      } else {
-        setLoading(false);
-      }
+    if (!isUserLoaded) {
+      return;
+    }
+
+    if (user) {
+      fetchDashboard();
+    } else {
+      setLoading(false);
     }
   }, [
     isUserLoaded,
@@ -624,6 +679,17 @@ export default function DashboardPage() {
     };
 
   // ==========================================================
+  // Current week
+  // ==========================================================
+
+  const currentWeek =
+    dashboard?.workout
+      ?.week_number ??
+    dashboard?.diet
+      ?.week_number ??
+    null;
+
+  // ==========================================================
   // Activity toggle
   // ==========================================================
 
@@ -633,7 +699,7 @@ export default function DashboardPage() {
   ) => {
     if (
       !dashboard?.profile ||
-      !currentWeek
+      currentWeek == null
     ) {
       return;
     }
@@ -655,6 +721,7 @@ export default function DashboardPage() {
 
     setActivityLoading(key);
 
+    // Optimistic update.
     if (type === 'workout') {
       setWorkoutActivity(
         (previous) => ({
@@ -673,22 +740,25 @@ export default function DashboardPage() {
 
     try {
       const response =
-        await fetch('/api/logs', {
-          method: 'POST',
-          headers: {
-            'Content-Type':
-              'application/json',
-          },
-          credentials: 'include',
-          body: JSON.stringify({
-            type,
-            day,
-            week_number:
-              currentWeek,
-            completed:
-              nextValue,
-          }),
-        });
+        await fetch(
+          '/api/logs',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type':
+                'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify({
+              type,
+              day,
+              week_number:
+                currentWeek,
+              completed:
+                nextValue,
+            }),
+          }
+        );
 
       const data =
         await response.json();
@@ -705,6 +775,7 @@ export default function DashboardPage() {
         err
       );
 
+      // Rollback.
       if (type === 'workout') {
         setWorkoutActivity(
           (previous) => ({
@@ -821,13 +892,6 @@ export default function DashboardPage() {
   // Derived values
   // ==========================================================
 
-  const currentWeek =
-    dashboard?.workout
-      ?.week_number ??
-    dashboard?.diet
-      ?.week_number ??
-    null;
-
   const workoutDays =
     useMemo(() => {
       return DAYS.map(
@@ -900,6 +964,17 @@ export default function DashboardPage() {
           <p className="mt-2 text-slate-400">
             Please sign in to access your dashboard.
           </p>
+
+          <button
+            type="button"
+            onClick={() =>
+              (window.location.href =
+                '/login')
+            }
+            className="mt-6 rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700"
+          >
+            Go to Login
+          </button>
         </div>
       </div>
     );
@@ -929,6 +1004,7 @@ export default function DashboardPage() {
           </p>
 
           <button
+            type="button"
             onClick={
               fetchDashboard
             }
@@ -968,7 +1044,9 @@ export default function DashboardPage() {
 
           <button
             type="button"
-            onClick={handleLogout}
+            onClick={
+              handleLogout
+            }
             className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
           >
             <LogOut className="mr-2 inline h-4 w-4" />
@@ -1046,7 +1124,9 @@ export default function DashboardPage() {
 
           <button
             type="button"
-            onClick={handleLogout}
+            onClick={
+              handleLogout
+            }
             className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
           >
             <LogOut className="mr-2 inline h-4 w-4" />
@@ -1090,6 +1170,7 @@ export default function DashboardPage() {
               </div>
             ) : (
               <button
+                type="button"
                 onClick={
                   generateFirstPlan
                 }
@@ -1111,9 +1192,15 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
+
+      {/* ====================================================
+          Header
+      ==================================================== */}
+
       <header className="border-b border-slate-800 bg-slate-950/90">
         <div className="mx-auto max-w-7xl px-6 py-6 md:px-8">
           <div className="flex flex-wrap items-center justify-between gap-4">
+
             <div>
               <h1 className="text-3xl font-bold tracking-tight">
                 Welcome,{' '}
@@ -1128,6 +1215,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="flex items-center gap-3">
+
               <span className="inline-flex items-center gap-2 rounded-full border border-indigo-500/20 bg-indigo-500/10 px-4 py-2 text-sm font-semibold text-indigo-300">
                 <Zap className="h-4 w-4" />
                 Active: Week{' '}
@@ -1136,23 +1224,32 @@ export default function DashboardPage() {
 
               <button
                 type="button"
-                onClick={handleLogout}
+                onClick={
+                  handleLogout
+                }
                 className="rounded-lg border border-slate-800 bg-slate-900 p-2.5 text-slate-400 transition hover:bg-slate-800 hover:text-white"
                 title="Logout"
                 aria-label="Logout"
               >
                 <LogOut className="h-5 w-5" />
               </button>
+
             </div>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-8 md:px-8">
+
+        {/* ==================================================
+            Coach AI Insight
+        ================================================== */}
+
         {dashboard?.latestReview
           ?.ai_analysis && (
           <section className="mb-8 rounded-2xl border border-emerald-500/20 bg-emerald-950/20 p-6 shadow-lg">
             <div className="flex items-start gap-4">
+
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10">
                 <Sparkles className="h-6 w-6 text-emerald-400" />
               </div>
@@ -1176,13 +1273,19 @@ export default function DashboardPage() {
                   }
                 </p>
               </div>
+
             </div>
           </section>
         )}
 
-        {/* Workout */}
+        {/* ==================================================
+            Workout
+        ================================================== */}
+
         <section>
+
           <div className="mb-5 flex items-center gap-3">
+
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/10">
               <Dumbbell className="h-5 w-5 text-indigo-400" />
             </div>
@@ -1196,14 +1299,17 @@ export default function DashboardPage() {
                 Week {currentWeek}
               </p>
             </div>
+
           </div>
 
           <div className="grid gap-4">
+
             {workoutDays.map(
               ({
                 day,
                 data,
               }) => {
+
                 const expanded =
                   expandedWorkoutDay ===
                   day;
@@ -1228,6 +1334,7 @@ export default function DashboardPage() {
                         : 'border-slate-800'
                     }`}
                   >
+
                     <button
                       type="button"
                       onClick={() =>
@@ -1239,8 +1346,11 @@ export default function DashboardPage() {
                       }
                       className="flex w-full items-center justify-between gap-4 p-5 text-left"
                     >
+
                       <div>
+
                         <div className="flex items-center gap-3">
+
                           <h3 className="text-lg font-bold text-white">
                             {day}
                           </h3>
@@ -1250,17 +1360,21 @@ export default function DashboardPage() {
                               Completed
                             </span>
                           )}
+
                         </div>
 
                         <p className="mt-1 text-sm text-indigo-300">
                           {data.focus ||
                             'Training'}
                         </p>
+
                       </div>
 
                       <div className="flex items-center gap-4">
+
                         <span className="hidden items-center gap-1.5 text-sm text-slate-500 sm:flex">
                           <Clock3 className="h-4 w-4" />
+
                           {displayNumber(
                             data.duration_minutes
                           )}{' '}
@@ -1272,14 +1386,19 @@ export default function DashboardPage() {
                         ) : (
                           <ChevronDown className="h-5 w-5 text-slate-500" />
                         )}
+
                       </div>
+
                     </button>
 
                     {expanded && (
                       <div className="border-t border-slate-800 p-5">
+
                         <div className="mb-4 flex items-center justify-between">
+
                           <span className="flex items-center gap-2 text-sm text-slate-400">
                             <Clock3 className="h-4 w-4" />
+
                             {displayNumber(
                               data.duration_minutes
                             )}{' '}
@@ -1303,6 +1422,7 @@ export default function DashboardPage() {
                                 : 'bg-indigo-600 text-white hover:bg-indigo-700'
                             } disabled:cursor-not-allowed disabled:opacity-60`}
                           >
+
                             {loadingActivity ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
@@ -1312,24 +1432,32 @@ export default function DashboardPage() {
                             {completed
                               ? 'Completed'
                               : 'Mark Workout Complete'}
+
                           </button>
+
                         </div>
 
                         {data.exercises &&
                         data.exercises.length >
                           0 ? (
+
                           <div className="space-y-3">
+
                             {data.exercises.map(
                               (
                                 exercise,
                                 index
                               ) => (
+
                                 <div
                                   key={`${day}-${index}`}
                                   className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"
                                 >
+
                                   <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+
                                     <div>
+
                                       <h4 className="font-semibold text-white">
                                         {exercise.name ||
                                           exercise.exercise ||
@@ -1343,13 +1471,16 @@ export default function DashboardPage() {
                                           }
                                         </p>
                                       )}
+
                                     </div>
 
                                     <div className="grid grid-cols-3 gap-2 text-center text-xs">
+
                                       <div className="rounded-lg bg-slate-900 px-3 py-2">
                                         <p className="text-slate-500">
                                           Sets
                                         </p>
+
                                         <p className="mt-1 font-bold text-white">
                                           {exercise.sets ??
                                             '—'}
@@ -1360,6 +1491,7 @@ export default function DashboardPage() {
                                         <p className="text-slate-500">
                                           Reps
                                         </p>
+
                                         <p className="mt-1 font-bold text-white">
                                           {exercise.reps ??
                                             '—'}
@@ -1370,6 +1502,7 @@ export default function DashboardPage() {
                                         <p className="text-slate-500">
                                           Rest
                                         </p>
+
                                         <p className="mt-1 font-bold text-white">
                                           {exercise.rest_seconds ??
                                             exercise.rest ??
@@ -1377,29 +1510,46 @@ export default function DashboardPage() {
                                           s
                                         </p>
                                       </div>
+
                                     </div>
+
                                   </div>
+
                                 </div>
+
                               )
                             )}
+
                           </div>
+
                         ) : (
+
                           <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-5 text-center text-sm text-slate-500">
                             No exercises scheduled for this day.
                           </div>
+
                         )}
+
                       </div>
                     )}
+
                   </div>
                 );
               }
             )}
+
           </div>
+
         </section>
 
-        {/* Diet */}
+        {/* ==================================================
+            Diet
+        ================================================== */}
+
         <section className="mt-12">
+
           <div className="mb-5 flex items-center gap-3">
+
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10">
               <Utensils className="h-5 w-5 text-emerald-400" />
             </div>
@@ -1413,14 +1563,17 @@ export default function DashboardPage() {
                 Week {currentWeek}
               </p>
             </div>
+
           </div>
 
           <div className="grid gap-4">
+
             {dietDays.map(
               ({
                 day,
                 data,
               }) => {
+
                 const expanded =
                   expandedDietDay ===
                   day;
@@ -1455,6 +1608,7 @@ export default function DashboardPage() {
                         : 'border-slate-800'
                     }`}
                   >
+
                     <button
                       type="button"
                       onClick={() =>
@@ -1466,8 +1620,11 @@ export default function DashboardPage() {
                       }
                       className="flex w-full items-center justify-between gap-4 p-5 text-left"
                     >
+
                       <div>
+
                         <div className="flex items-center gap-3">
+
                           <h3 className="text-lg font-bold text-white">
                             {day}
                           </h3>
@@ -1477,11 +1634,14 @@ export default function DashboardPage() {
                               Completed
                             </span>
                           )}
+
                         </div>
 
                         <div className="mt-2 flex flex-wrap gap-3 text-xs">
+
                           <span className="inline-flex items-center gap-1.5 text-orange-400">
                             <Flame className="h-4 w-4" />
+
                             {displayNumber(
                               totalCalories
                             )}{' '}
@@ -1490,12 +1650,15 @@ export default function DashboardPage() {
 
                           <span className="inline-flex items-center gap-1.5 text-emerald-400">
                             <Zap className="h-4 w-4" />
+
                             {displayNumber(
                               totalProtein
                             )}
                             g protein
                           </span>
+
                         </div>
+
                       </div>
 
                       {expanded ? (
@@ -1503,11 +1666,14 @@ export default function DashboardPage() {
                       ) : (
                         <ChevronDown className="h-5 w-5 shrink-0 text-slate-500" />
                       )}
+
                     </button>
 
                     {expanded && (
                       <div className="border-t border-slate-800 p-5">
+
                         <div className="mb-5 flex justify-end">
+
                           <button
                             type="button"
                             disabled={
@@ -1525,6 +1691,7 @@ export default function DashboardPage() {
                                 : 'bg-emerald-600 text-white hover:bg-emerald-700'
                             } disabled:cursor-not-allowed disabled:opacity-60`}
                           >
+
                             {loadingActivity ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
@@ -1534,10 +1701,13 @@ export default function DashboardPage() {
                             {completed
                               ? 'Completed'
                               : 'Mark Diet Complete'}
+
                           </button>
+
                         </div>
 
                         <div className="grid gap-4 md:grid-cols-2">
+
                           {[
                             {
                               title:
@@ -1576,26 +1746,32 @@ export default function DashboardPage() {
                               title,
                               meals,
                             }) => (
+
                               <div
                                 key={title}
                                 className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"
                               >
+
                                 <h4 className="font-semibold text-white">
                                   {title}
                                 </h4>
 
                                 {meals.length >
                                 0 ? (
+
                                   <div className="mt-3 space-y-3">
+
                                     {meals.map(
                                       (
                                         meal,
                                         index
                                       ) => (
+
                                         <div
                                           key={`${title}-${index}`}
                                           className="rounded-lg bg-slate-900 p-3"
                                         >
+
                                           <p className="text-sm font-medium text-slate-200">
                                             {getMealName(
                                               meal
@@ -1603,6 +1779,7 @@ export default function DashboardPage() {
                                           </p>
 
                                           <div className="mt-2 flex gap-4 text-xs">
+
                                             <span className="text-orange-400">
                                               {
                                                 getMealCalories(
@@ -1620,23 +1797,35 @@ export default function DashboardPage() {
                                               }
                                               g protein
                                             </span>
+
                                           </div>
+
                                         </div>
+
                                       )
                                     )}
+
                                   </div>
+
                                 ) : (
+
                                   <p className="mt-3 text-sm text-slate-500">
                                     No items listed.
                                   </p>
+
                                 )}
+
                               </div>
+
                             )
                           )}
+
                         </div>
 
                         <div className="mt-5 grid grid-cols-2 gap-3">
+
                           <div className="rounded-xl border border-orange-500/10 bg-orange-500/5 p-4">
+
                             <p className="text-xs text-slate-500">
                               Daily Calories
                             </p>
@@ -1647,9 +1836,11 @@ export default function DashboardPage() {
                               )}{' '}
                               kcal
                             </p>
+
                           </div>
 
                           <div className="rounded-xl border border-emerald-500/10 bg-emerald-500/5 p-4">
+
                             <p className="text-xs text-slate-500">
                               Daily Protein
                             </p>
@@ -1660,20 +1851,31 @@ export default function DashboardPage() {
                               )}
                               g
                             </p>
+
                           </div>
+
                         </div>
+
                       </div>
                     )}
+
                   </div>
                 );
               }
             )}
+
           </div>
+
         </section>
 
-        {/* Weekly Review */}
+        {/* ==================================================
+            Weekly Review
+        ================================================== */}
+
         <section className="mt-12 pb-12">
+
           <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-6 text-center">
+
             <Sparkles className="mx-auto h-8 w-8 text-indigo-400" />
 
             <h2 className="mt-3 text-xl font-bold text-white">
@@ -1696,11 +1898,16 @@ export default function DashboardPage() {
               {currentWeek ?? ''}{' '}
               & Review
             </button>
+
           </div>
+
         </section>
+
       </main>
 
-      {/* Weekly Review Modal */}
+      {/* ====================================================
+          Weekly Review Modal
+      ==================================================== */}
 
       {modalOpen && (
         <div
@@ -1716,8 +1923,11 @@ export default function DashboardPage() {
             }
           }}
         >
+
           <div className="my-8 w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+
             <div className="flex items-center justify-between border-b border-slate-800 p-6">
+
               <div>
                 <h2 className="text-xl font-bold text-white">
                   Weekly Check-In
@@ -1740,6 +1950,7 @@ export default function DashboardPage() {
               >
                 <X className="h-5 w-5" />
               </button>
+
             </div>
 
             <form
@@ -1748,7 +1959,11 @@ export default function DashboardPage() {
               }
               className="space-y-5 p-6"
             >
+
+              {/* Weight */}
+
               <div>
+
                 <label className="text-sm font-medium text-slate-300">
                   Current Weight (kg)
                 </label>
@@ -1775,9 +1990,13 @@ export default function DashboardPage() {
                   className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-white outline-none focus:border-indigo-500"
                   placeholder="e.g. 70.5"
                 />
+
               </div>
 
+              {/* Difficulty */}
+
               <div>
+
                 <label className="text-sm font-medium text-slate-300">
                   Workout Difficulty
                 </label>
@@ -1799,6 +2018,7 @@ export default function DashboardPage() {
                   }
                   className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-white outline-none focus:border-indigo-500"
                 >
+
                   <option value="Too Easy">
                     Too Easy
                   </option>
@@ -1810,17 +2030,24 @@ export default function DashboardPage() {
                   <option value="Too Hard">
                     Too Hard
                   </option>
+
                 </select>
+
               </div>
 
+              {/* Energy */}
+
               <div>
+
                 <label className="text-sm font-medium text-slate-300">
                   Energy Level
                 </label>
 
                 <div className="mt-2 flex gap-2">
+
                   {[1, 2, 3, 4, 5].map(
                     (number) => (
+
                       <button
                         key={number}
                         type="button"
@@ -1842,12 +2069,18 @@ export default function DashboardPage() {
                       >
                         {number}
                       </button>
+
                     )
                   )}
+
                 </div>
+
               </div>
 
+              {/* Notes */}
+
               <div>
+
                 <label className="text-sm font-medium text-slate-300">
                   Feedback / Notes
                 </label>
@@ -1871,7 +2104,10 @@ export default function DashboardPage() {
                   className="mt-2 w-full resize-none rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-white outline-none focus:border-indigo-500"
                   placeholder="How did the week feel? What should the AI Coach know?"
                 />
+
               </div>
+
+              {/* Error */}
 
               {submitError && (
                 <div className="rounded-lg border border-red-900/50 bg-red-950/30 p-3 text-sm text-red-300">
@@ -1879,7 +2115,10 @@ export default function DashboardPage() {
                 </div>
               )}
 
+              {/* Actions */}
+
               <div className="flex justify-end gap-3 pt-2">
+
                 <button
                   type="button"
                   disabled={
@@ -1900,6 +2139,7 @@ export default function DashboardPage() {
                   }
                   className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
+
                   {submittingReview ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -1911,12 +2151,18 @@ export default function DashboardPage() {
                       Submit Review
                     </>
                   )}
+
                 </button>
+
               </div>
+
             </form>
+
           </div>
+
         </div>
       )}
+
     </div>
   );
 }
