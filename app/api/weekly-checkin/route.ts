@@ -43,7 +43,13 @@ if (!geminiApiKey) {
 
 const supabase = createClient(
   supabaseUrl,
-  supabaseServiceRoleKey
+  supabaseServiceRoleKey,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  }
 );
 
 // ============================================================
@@ -53,9 +59,12 @@ const supabase = createClient(
 const genAI =
   new GoogleGenerativeAI(geminiApiKey);
 
+// IMPORTANT:
+// gemini-2.5-flash was causing the 404 in your deployment.
+// Current model used here: gemini-3.6-flash.
 const model =
   genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3.6-flash',
   });
 
 // ============================================================
@@ -189,6 +198,7 @@ async function countCompletedActivities(
   return {
     workouts_completed:
       workoutCount ?? 0,
+
     diet_completed:
       dietCount ?? 0,
   };
@@ -203,7 +213,7 @@ export async function POST(
 ) {
   try {
     // --------------------------------------------------------
-    // Authentication
+    // 1. Authentication
     // --------------------------------------------------------
 
     const { userId } = await auth();
@@ -220,7 +230,7 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // Body
+    // 2. Body
     // --------------------------------------------------------
 
     let body: any;
@@ -239,7 +249,7 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // Validation
+    // 3. Validation
     // --------------------------------------------------------
 
     let checkin: CheckinRequest;
@@ -261,7 +271,7 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // Profile
+    // 4. Profile
     // --------------------------------------------------------
 
     const {
@@ -306,7 +316,7 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // Active workout
+    // 5. Active workout
     // --------------------------------------------------------
 
     const {
@@ -323,6 +333,10 @@ export async function POST(
         'is_active',
         true
       )
+      .order('week_number', {
+        ascending: false,
+      })
+      .limit(1)
       .maybeSingle();
 
     if (workoutPlanError) {
@@ -355,7 +369,7 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // Active diet
+    // 6. Active diet
     // --------------------------------------------------------
 
     const {
@@ -372,6 +386,10 @@ export async function POST(
         'is_active',
         true
       )
+      .order('week_number', {
+        ascending: false,
+      })
+      .limit(1)
       .maybeSingle();
 
     if (dietPlanError) {
@@ -386,7 +404,7 @@ export async function POST(
             'Failed to fetch diet plan',
         },
         {
-          status: 500,
+          status: 500
         }
       );
     }
@@ -404,14 +422,14 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // Current week
+    // 7. Current week
     // --------------------------------------------------------
 
     const currentWeek =
       workoutPlan.week_number;
 
     // --------------------------------------------------------
-    // Activity counts
+    // 8. Activity counts
     // --------------------------------------------------------
 
     const {
@@ -424,7 +442,7 @@ export async function POST(
       );
 
     // --------------------------------------------------------
-    // Gemini prompt
+    // 9. Gemini prompt
     // --------------------------------------------------------
 
     const prompt =
@@ -439,7 +457,7 @@ export async function POST(
       });
 
     // --------------------------------------------------------
-    // Gemini
+    // 10. Gemini
     // --------------------------------------------------------
 
     const result =
@@ -450,8 +468,20 @@ export async function POST(
     const responseText =
       result.response.text();
 
+    if (!responseText) {
+      return NextResponse.json(
+        {
+          error:
+            'AI returned an empty response',
+        },
+        {
+          status: 502,
+        }
+      );
+    }
+
     // --------------------------------------------------------
-    // Parse AI JSON
+    // 11. Parse AI JSON
     // --------------------------------------------------------
 
     let aiOutput: any;
@@ -494,7 +524,7 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // Validate AI output
+    // 12. Validate AI output
     // --------------------------------------------------------
 
     if (
@@ -503,7 +533,11 @@ export async function POST(
       typeof aiOutput.ai_analysis !==
         'string' ||
       !aiOutput.workout ||
-      !aiOutput.diet
+      typeof aiOutput.workout !==
+        'object' ||
+      !aiOutput.diet ||
+      typeof aiOutput.diet !==
+        'object'
     ) {
       return NextResponse.json(
         {
@@ -517,7 +551,7 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // Save everything through RPC
+    // 13. Save everything through RPC
     // --------------------------------------------------------
 
     const {
@@ -581,16 +615,25 @@ export async function POST(
       );
     }
 
+    // --------------------------------------------------------
+    // 14. Success
+    // --------------------------------------------------------
+
     return NextResponse.json({
       success: true,
+
       week_number:
         currentWeek + 1,
+
       ai_analysis:
         aiOutput.ai_analysis,
+
       workout:
         aiOutput.workout,
+
       diet:
         aiOutput.diet,
+
       transaction_result:
         transactionResult,
     });
@@ -682,6 +725,9 @@ RULES:
 - Keep nutrition practical and reasonable.
 - Respect the user's equipment, budget and preferences.
 - Do not make extreme or unsafe recommendations.
+- Return exactly the requested JSON structure.
+- Do not include markdown.
+- Do not include explanations outside the JSON.
 
 Return ONLY valid JSON.
 
