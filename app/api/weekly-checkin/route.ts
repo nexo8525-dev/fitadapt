@@ -59,12 +59,9 @@ const supabase = createClient(
 const genAI =
   new GoogleGenerativeAI(geminiApiKey);
 
-// IMPORTANT:
-// gemini-2.5-flash was causing the 404 in your deployment.
-// Current model used here: gemini-3.6-flash.
 const model =
   genAI.getGenerativeModel({
-    model: 'gemini-3.6-flash',
+    model: 'gemini-3.7-flash',
   });
 
 // ============================================================
@@ -91,7 +88,9 @@ function validateRequest(
   body: any
 ): CheckinRequest {
   if (!body || typeof body !== 'object') {
-    throw new Error('Invalid request body');
+    throw new Error(
+      'Invalid request body'
+    );
   }
 
   const {
@@ -404,7 +403,7 @@ export async function POST(
             'Failed to fetch diet plan',
         },
         {
-          status: 500
+          status: 500,
         }
       );
     }
@@ -468,18 +467,6 @@ export async function POST(
     const responseText =
       result.response.text();
 
-    if (!responseText) {
-      return NextResponse.json(
-        {
-          error:
-            'AI returned an empty response',
-        },
-        {
-          status: 502,
-        }
-      );
-    }
-
     // --------------------------------------------------------
     // 11. Parse AI JSON
     // --------------------------------------------------------
@@ -533,11 +520,7 @@ export async function POST(
       typeof aiOutput.ai_analysis !==
         'string' ||
       !aiOutput.workout ||
-      typeof aiOutput.workout !==
-        'object' ||
-      !aiOutput.diet ||
-      typeof aiOutput.diet !==
-        'object'
+      !aiOutput.diet
     ) {
       return NextResponse.json(
         {
@@ -606,6 +589,7 @@ export async function POST(
         {
           error:
             'Database transaction failed',
+
           details:
             transactionError.message,
         },
@@ -616,7 +600,7 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 14. Success
+    // 14. Return
     // --------------------------------------------------------
 
     return NextResponse.json({
@@ -725,9 +709,8 @@ RULES:
 - Keep nutrition practical and reasonable.
 - Respect the user's equipment, budget and preferences.
 - Do not make extreme or unsafe recommendations.
-- Return exactly the requested JSON structure.
-- Do not include markdown.
-- Do not include explanations outside the JSON.
+- Keep workout sessions practical and time-efficient.
+- Do not invent equipment that is not available to the user.
 
 Return ONLY valid JSON.
 
