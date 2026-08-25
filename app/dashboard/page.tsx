@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 
 import {
+  useAuth,
   useClerk,
   useUser,
 } from '@clerk/nextjs';
@@ -397,6 +398,12 @@ export default function DashboardPage() {
   // IMPORTANT:
   // signOut comes from useClerk(), NOT useUser().
   const { signOut } = useClerk();
+
+  // Used to force-refresh the Clerk session token
+  // right before hitting protected API routes,
+  // so a stale/expired token in the browser doesn't
+  // cause a false "Unauthorized" on submit.
+  const { getToken } = useAuth();
 
   // ==========================================================
   // Dashboard state
@@ -815,6 +822,17 @@ export default function DashboardPage() {
       setSubmitError('');
 
       try {
+        // Force Clerk to refresh the session token
+        // before hitting the protected API route.
+        // Without this, a stale/expired token sitting
+        // in the browser (e.g. after the form was left
+        // open for a while) can cause the server-side
+        // auth() call to see a null userId and return
+        // a false "Unauthorized" error.
+        await getToken({
+          skipCache: true,
+        });
+
         const weight =
           Number(
             formData.weight_kg
