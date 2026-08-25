@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // ============================================================
-// Environment
+// ENVIRONMENT
 // ============================================================
 
 const supabaseUrl =
@@ -38,7 +38,7 @@ if (!geminiApiKey) {
 }
 
 // ============================================================
-// Server-only Supabase client
+// SUPABASE
 // ============================================================
 
 const supabase = createClient(
@@ -53,19 +53,14 @@ const supabase = createClient(
 );
 
 // ============================================================
-// Gemini
+// GEMINI
 // ============================================================
 
 const genAI =
   new GoogleGenerativeAI(geminiApiKey);
 
-const model =
-  genAI.getGenerativeModel({
-    model: 'gemini-3.7-flash',
-  });
-
 // ============================================================
-// Types
+// TYPES
 // ============================================================
 
 type WorkoutDifficulty =
@@ -81,13 +76,64 @@ interface CheckinRequest {
 }
 
 // ============================================================
-// Validation
+// GEMINI MODELS
+//
+// We try the newest model first.
+// If Google temporarily returns 503/429,
+// we automatically try the next model.
+//
+// This prevents a temporary model overload from
+// breaking the whole weekly check-in.
+// ============================================================
+
+const GEMINI_MODELS = [
+  'gemini-3.7-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+];
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+function sleep(ms: number) {
+  return new Promise((resolve) =>
+    setTimeout(resolve, ms)
+  );
+}
+
+function isRetryableGeminiError(
+  error: any
+) {
+  const message =
+    String(
+      error?.message ||
+        error ||
+        ''
+    ).toLowerCase();
+
+  return (
+    message.includes('503') ||
+    message.includes('service unavailable') ||
+    message.includes('high demand') ||
+    message.includes('429') ||
+    message.includes('resource exhausted') ||
+    message.includes('rate limit') ||
+    message.includes('temporarily unavailable')
+  );
+}
+
+// ============================================================
+// VALIDATION
 // ============================================================
 
 function validateRequest(
   body: any
 ): CheckinRequest {
-  if (!body || typeof body !== 'object') {
+  if (
+    !body ||
+    typeof body !== 'object'
+  ) {
     throw new Error(
       'Invalid request body'
     );
@@ -128,7 +174,9 @@ function validateRequest(
 
   if (
     typeof energy_rating !== 'number' ||
-    !Number.isInteger(energy_rating) ||
+    !Number.isInteger(
+      energy_rating
+    ) ||
     energy_rating < 1 ||
     energy_rating > 5
   ) {
@@ -149,7 +197,7 @@ function validateRequest(
 }
 
 // ============================================================
-// Activity counts
+// COUNT COMPLETED ACTIVITIES
 // ============================================================
 
 async function countCompletedActivities(
@@ -165,9 +213,18 @@ async function countCompletedActivities(
       count: 'exact',
       head: true,
     })
-    .eq('user_id', userId)
-    .eq('week_number', weekNumber)
-    .eq('completed', true);
+    .eq(
+      'user_id',
+      userId
+    )
+    .eq(
+      'week_number',
+      weekNumber
+    )
+    .eq(
+      'completed',
+      true
+    );
 
   if (workoutError) {
     throw new Error(
@@ -184,9 +241,18 @@ async function countCompletedActivities(
       count: 'exact',
       head: true,
     })
-    .eq('user_id', userId)
-    .eq('week_number', weekNumber)
-    .eq('completed', true);
+    .eq(
+      'user_id',
+      userId
+    )
+    .eq(
+      'week_number',
+      weekNumber
+    )
+    .eq(
+      'completed',
+      true
+    );
 
   if (dietError) {
     throw new Error(
@@ -204,6 +270,239 @@ async function countCompletedActivities(
 }
 
 // ============================================================
+// GENERATE GEMINI RESPONSE
+//
+// Retry strategy:
+//
+// Model 3.7
+//   ↓ 503/429
+// retry once
+//   ↓ still failing
+// Model 3.6
+//   ↓ 503/429
+// retry once
+//   ↓ still failing
+// Model 3.5
+//
+// This is much more reliable than depending on
+// one model only.
+// ============================================================
+
+async function generateWithGemini(
+  prompt: string
+) {
+  let lastError: any = null;
+
+  for (
+    let modelIndex = 0;
+    modelIndex < GEMINI_MODELS.length;
+    modelIndex++
+  ) {
+    const modelName =
+      GEMINI_MODELS[
+        modelIndex
+      ];
+
+    const model =
+      genAI.getGenerativeModel({
+        model: modelName,
+
+        generationConfig: {
+          responseMimeType:
+            'application/json',
+        },
+      });
+
+    // Try each model up to 2 times.
+    for (
+      let attempt = 1;
+      attempt <= 2;
+      attempt++
+    ) {
+      try {
+        console.log(
+          `Gemini request: ${modelName}, attempt ${attempt}`
+        );
+
+        const result =
+          await model.generateContent(
+            prompt
+          );
+
+        const text =
+          result.response.text();
+
+        if (
+          !text ||
+          !text.trim()
+        ) {
+          throw new Error(
+            'Gemini returned an empty response'
+          );
+        }
+
+        console.log(
+          `Gemini success: ${modelName}`
+        );
+
+        return {
+          model: modelName,
+          text,
+        };
+      } catch (error: any) {
+        lastError = error;
+
+        console.error(
+          `Gemini error [${modelName}] attempt ${attempt}:`,
+          error
+        );
+
+        const retryable =
+          isRetryableGeminiError(
+            error
+          );
+
+        // If the error is not temporary,
+        // don't waste time trying other models.
+        if (!retryable) {
+          throw error;
+        }
+
+        // Wait before retrying.
+        if (attempt === 1) {
+          await sleep(1500);
+        }
+      }
+    }
+
+    // Move to next model.
+    console.log(
+      `Switching Gemini model from ${modelName}`
+    );
+
+    // Small delay before fallback.
+    await sleep(500);
+  }
+
+  throw (
+    lastError ||
+    new Error(
+      'All Gemini models failed'
+    )
+  );
+}
+
+// ============================================================
+// PARSE GEMINI JSON
+// ============================================================
+
+function parseGeminiJSON(
+  responseText: string
+) {
+  let cleaned =
+    responseText.trim();
+
+  // Remove markdown JSON fences
+  cleaned =
+    cleaned
+      .replace(
+        /^```json\s*/i,
+        ''
+      )
+      .replace(
+        /^```\s*/i,
+        ''
+      )
+      .replace(
+        /\s*```$/i,
+        ''
+      )
+      .trim();
+
+  try {
+    return JSON.parse(
+      cleaned
+    );
+  } catch {
+    // Fallback:
+    // Find first { and last }
+    const first =
+      cleaned.indexOf('{');
+
+    const last =
+      cleaned.lastIndexOf('}');
+
+    if (
+      first !== -1 &&
+      last !== -1 &&
+      last > first
+    ) {
+      const possibleJSON =
+        cleaned.slice(
+          first,
+          last + 1
+        );
+
+      return JSON.parse(
+        possibleJSON
+      );
+    }
+
+    throw new Error(
+      'Gemini returned invalid JSON'
+    );
+  }
+}
+
+// ============================================================
+// VALIDATE AI OUTPUT
+// ============================================================
+
+function validateAIOutput(
+  output: any
+) {
+  if (
+    !output ||
+    typeof output !== 'object'
+  ) {
+    throw new Error(
+      'AI output is not an object'
+    );
+  }
+
+  if (
+    typeof output.ai_analysis !==
+    'string'
+  ) {
+    throw new Error(
+      'AI output missing ai_analysis'
+    );
+  }
+
+  if (
+    !output.workout ||
+    typeof output.workout !==
+      'object'
+  ) {
+    throw new Error(
+      'AI output missing workout'
+    );
+  }
+
+  if (
+    !output.diet ||
+    typeof output.diet !==
+      'object'
+  ) {
+    throw new Error(
+      'AI output missing diet'
+    );
+  }
+
+  return output;
+}
+
+// ============================================================
 // POST
 // ============================================================
 
@@ -212,15 +511,17 @@ export async function POST(
 ) {
   try {
     // --------------------------------------------------------
-    // 1. Authentication
+    // 1. AUTHENTICATION
     // --------------------------------------------------------
 
-    const { userId } = await auth();
+    const { userId } =
+      await auth();
 
     if (!userId) {
       return NextResponse.json(
         {
-          error: 'Unauthorized',
+          error:
+            'Unauthorized',
         },
         {
           status: 401,
@@ -229,17 +530,19 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 2. Body
+    // 2. READ BODY
     // --------------------------------------------------------
 
     let body: any;
 
     try {
-      body = await req.json();
+      body =
+        await req.json();
     } catch {
       return NextResponse.json(
         {
-          error: 'Invalid JSON body',
+          error:
+            'Invalid JSON body',
         },
         {
           status: 400,
@@ -248,15 +551,19 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 3. Validation
+    // 3. VALIDATE
     // --------------------------------------------------------
 
     let checkin: CheckinRequest;
 
     try {
       checkin =
-        validateRequest(body);
-    } catch (error: any) {
+        validateRequest(
+          body
+        );
+    } catch (
+      error: any
+    ) {
       return NextResponse.json(
         {
           error:
@@ -270,20 +577,21 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 4. Profile
+    // 4. GET PROFILE
     // --------------------------------------------------------
 
     const {
       data: profile,
       error: profileError,
-    } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq(
-        'clerk_user_id',
-        userId
-      )
-      .maybeSingle();
+    } =
+      await supabase
+        .from('profiles')
+        .select('*')
+        .eq(
+          'clerk_user_id',
+          userId
+        )
+        .maybeSingle();
 
     if (profileError) {
       console.error(
@@ -315,28 +623,35 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 5. Active workout
+    // 5. GET ACTIVE WORKOUT
     // --------------------------------------------------------
 
     const {
       data: workoutPlan,
-      error: workoutPlanError,
-    } = await supabase
-      .from('workout_plans')
-      .select('*')
-      .eq(
-        'user_id',
-        profile.id
-      )
-      .eq(
-        'is_active',
-        true
-      )
-      .order('week_number', {
-        ascending: false,
-      })
-      .limit(1)
-      .maybeSingle();
+      error:
+        workoutPlanError,
+    } =
+      await supabase
+        .from(
+          'workout_plans'
+        )
+        .select('*')
+        .eq(
+          'user_id',
+          profile.id
+        )
+        .eq(
+          'is_active',
+          true
+        )
+        .order(
+          'week_number',
+          {
+            ascending: false,
+          }
+        )
+        .limit(1)
+        .maybeSingle();
 
     if (workoutPlanError) {
       console.error(
@@ -368,28 +683,35 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 6. Active diet
+    // 6. GET ACTIVE DIET
     // --------------------------------------------------------
 
     const {
       data: dietPlan,
-      error: dietPlanError,
-    } = await supabase
-      .from('diet_plans')
-      .select('*')
-      .eq(
-        'user_id',
-        profile.id
-      )
-      .eq(
-        'is_active',
-        true
-      )
-      .order('week_number', {
-        ascending: false,
-      })
-      .limit(1)
-      .maybeSingle();
+      error:
+        dietPlanError,
+    } =
+      await supabase
+        .from(
+          'diet_plans'
+        )
+        .select('*')
+        .eq(
+          'user_id',
+          profile.id
+        )
+        .eq(
+          'is_active',
+          true
+        )
+        .order(
+          'week_number',
+          {
+            ascending: false,
+          }
+        )
+        .limit(1)
+        .maybeSingle();
 
     if (dietPlanError) {
       console.error(
@@ -421,14 +743,14 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 7. Current week
+    // 7. CURRENT WEEK
     // --------------------------------------------------------
 
     const currentWeek =
       workoutPlan.week_number;
 
     // --------------------------------------------------------
-    // 8. Activity counts
+    // 8. ACTIVITY COUNTS
     // --------------------------------------------------------
 
     const {
@@ -441,7 +763,7 @@ export async function POST(
       );
 
     // --------------------------------------------------------
-    // 9. Gemini prompt
+    // 9. BUILD PROMPT
     // --------------------------------------------------------
 
     const prompt =
@@ -452,80 +774,73 @@ export async function POST(
         currentWeek,
         workouts_completed,
         diet_completed,
-        feedback: checkin,
+        feedback:
+          checkin,
       });
 
     // --------------------------------------------------------
-    // 10. Gemini
+    // 10. GEMINI
     // --------------------------------------------------------
 
-    const result =
-      await model.generateContent(
-        prompt
+    let geminiResult;
+
+    try {
+      geminiResult =
+        await generateWithGemini(
+          prompt
+        );
+    } catch (
+      error: any
+    ) {
+      console.error(
+        'All Gemini attempts failed:',
+        error
       );
 
-    const responseText =
-      result.response.text();
+      return NextResponse.json(
+        {
+          error:
+            'AI service is temporarily unavailable. Please try again in a few minutes.',
+        },
+        {
+          status: 503,
+        }
+      );
+    }
+
+    console.log(
+      'Gemini model used:',
+      geminiResult.model
+    );
 
     // --------------------------------------------------------
-    // 11. Parse AI JSON
+    // 11. PARSE JSON
     // --------------------------------------------------------
 
     let aiOutput: any;
 
     try {
-      const fenced =
-        responseText.match(
-          /```json\s*([\s\S]*?)\s*```/i
+      aiOutput =
+        parseGeminiJSON(
+          geminiResult.text
         );
-
-      const object =
-        responseText.match(
-          /(\{[\s\S]*\})/
-        );
-
-      const jsonString =
-        fenced?.[1] ??
-        object?.[1] ??
-        responseText;
 
       aiOutput =
-        JSON.parse(
-          jsonString.trim()
+        validateAIOutput(
+          aiOutput
         );
-    } catch (error) {
-      console.error(
-        'Gemini response:',
-        responseText
-      );
-
-      return NextResponse.json(
-        {
-          error:
-            'AI returned invalid JSON',
-        },
-        {
-          status: 502,
-        }
-      );
-    }
-
-    // --------------------------------------------------------
-    // 12. Validate AI output
-    // --------------------------------------------------------
-
-    if (
-      !aiOutput ||
-      typeof aiOutput !== 'object' ||
-      typeof aiOutput.ai_analysis !==
-        'string' ||
-      !aiOutput.workout ||
-      !aiOutput.diet
+    } catch (
+      error: any
     ) {
+      console.error(
+        'Invalid Gemini output:',
+        geminiResult.text
+      );
+
       return NextResponse.json(
         {
           error:
-            'AI response is missing required fields',
+            'AI returned an invalid plan. Please try again.',
         },
         {
           status: 502,
@@ -534,12 +849,14 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 13. Save everything through RPC
+    // 12. SAVE EVERYTHING THROUGH RPC
     // --------------------------------------------------------
 
     const {
-      data: transactionResult,
-      error: transactionError,
+      data:
+        transactionResult,
+      error:
+        transactionError,
     } =
       await supabase.rpc(
         'generate_new_week_plans',
@@ -566,7 +883,8 @@ export async function POST(
             diet_completed,
 
           p_user_notes:
-            checkin.user_notes ?? '',
+            checkin.user_notes ??
+            '',
 
           p_ai_analysis:
             aiOutput.ai_analysis,
@@ -589,9 +907,6 @@ export async function POST(
         {
           error:
             'Database transaction failed',
-
-          details:
-            transactionError.message,
         },
         {
           status: 500,
@@ -600,7 +915,7 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 14. Return
+    // 13. SUCCESS
     // --------------------------------------------------------
 
     return NextResponse.json({
@@ -620,8 +935,13 @@ export async function POST(
 
       transaction_result:
         transactionResult,
+
+      ai_model:
+        geminiResult.model,
     });
-  } catch (error: any) {
+  } catch (
+    error: any
+  ) {
     console.error(
       'Weekly check-in error:',
       error
@@ -641,7 +961,7 @@ export async function POST(
 }
 
 // ============================================================
-// Gemini Prompt
+// GEMINI PROMPT
 // ============================================================
 
 function buildGeminiPrompt({
@@ -664,11 +984,19 @@ function buildGeminiPrompt({
   return `
 You are an expert fitness and nutrition coach.
 
-Generate a personalized plan for Week ${
+Your job is to generate the user's next 7-day personalized
+workout and diet plan.
+
+Generate Week ${
     currentWeek + 1
   }.
 
-USER BASELINE:
+IMPORTANT:
+The user wants practical, sustainable plans.
+Do not make extreme recommendations.
+Do not recommend unsafe training or extreme dieting.
+
+USER PROFILE:
 ${JSON.stringify(
   profile,
   null,
@@ -689,67 +1017,100 @@ ${JSON.stringify(
   2
 )}
 
-ADHERENCE:
+WEEKLY ADHERENCE:
 - Workout days completed: ${workouts_completed}/7
 - Diet days completed: ${diet_completed}/7
 
 WEEKLY FEEDBACK:
-- Weight: ${feedback.weight_kg} kg
+- Current weight: ${feedback.weight_kg} kg
 - Workout difficulty: ${feedback.workout_difficulty}
-- Energy: ${feedback.energy_rating}/5
-- Notes: ${
+- Energy level: ${feedback.energy_rating}/5
+- User notes: ${
     feedback.user_notes ||
     'None'
   }
 
-RULES:
-- Consider adherence before making major changes.
-- If training is Too Easy, use progressive overload.
-- If training is Too Hard or energy is below 3, reduce volume/intensity.
-- Keep nutrition practical and reasonable.
-- Respect the user's equipment, budget and preferences.
-- Do not make extreme or unsafe recommendations.
-- Keep workout sessions practical and time-efficient.
-- Do not invent equipment that is not available to the user.
+ADAPTATION RULES:
 
-Return ONLY valid JSON.
+1. Consider adherence before making major changes.
+
+2. If workout difficulty is "Too Easy":
+   - Increase difficulty gradually.
+   - Prefer progressive overload,
+     better exercise variations,
+     controlled tempo,
+     or small volume increases.
+   - Do NOT suddenly double training volume.
+
+3. If workout difficulty is "Too Hard":
+   - Reduce volume or intensity.
+   - Prefer easier variations.
+   - Keep technique quality high.
+
+4. If energy is below 3/5:
+   - Reduce training stress.
+   - Avoid aggressive progression.
+
+5. If adherence is low:
+   - Prefer a simpler and more achievable plan
+     instead of simply increasing workload.
+
+6. Respect the user's:
+   - available equipment
+   - budget
+   - food preferences
+   - previous plan structure
+
+7. Workout sessions should remain practical
+   and should generally stay around 30 minutes.
+
+8. Diet should be practical, affordable,
+   balanced and sustainable.
+
+9. Do not make medical diagnoses.
+
+10. Do not invent supplements as mandatory.
+
+RETURN ONLY VALID JSON.
+
+The JSON must have exactly this high-level structure:
 
 {
-  "ai_analysis": "3-4 sentence weekly analysis.",
+  "ai_analysis": "3-4 sentence analysis of the week and what changed.",
   "workout": {
     "Monday": {
-      "focus": "",
-      "duration_minutes": 0,
+      "focus": "string",
+      "duration_minutes": 30,
       "exercises": []
     },
     "Tuesday": {
-      "focus": "",
-      "duration_minutes": 0,
+      "focus": "string",
+      "duration_minutes": 30,
       "exercises": []
     },
     "Wednesday": {
-      "focus": "",
-      "duration_minutes": 0,
+      "focus": "string",
+      "duration_minutes": 30,
       "exercises": []
     },
     "Thursday": {
-      "focus": "",
-      "duration_minutes": 0,
+      "focus": "string",
+      "duration_minutes": 30,
       "exercises": []
     },
     "Friday": {
-      "focus": "",
-      "duration_minutes": 0,
+      "focus": "string",
+      "duration_minutes": 30,
       "exercises": []
     },
     "Saturday": {
-      "focus": "",
-      "duration_minutes": 0,
+      "focus": "string",
+      "duration_minutes": 30,
       "exercises": []
     },
     "Sunday": {
-      "focus": "",
-      "duration_minutes": 0,
+      "focus": "string",
+      "duration_minutes": 30,
       "exercises": []
     }
   },
@@ -763,5 +1124,16 @@ Return ONLY valid JSON.
     "Sunday": {}
   }
 }
+
+For workout exercises, include useful fields such as:
+- name
+- sets
+- reps
+- rest_seconds
+- notes
+
+Keep the output valid JSON.
+Do not use markdown.
+Do not put JSON inside code fences.
 `;
 }
