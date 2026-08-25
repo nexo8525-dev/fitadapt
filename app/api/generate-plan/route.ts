@@ -42,17 +42,16 @@ if (!geminiApiKey) {
 // SERVER ONLY
 // ============================================================
 
-const supabaseAdmin =
-  createClient(
-    supabaseUrl,
-    supabaseServiceRoleKey,
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    }
-  );
+const supabaseAdmin = createClient(
+  supabaseUrl,
+  supabaseServiceRoleKey,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  }
+);
 
 // ============================================================
 // GEMINI
@@ -63,14 +62,85 @@ const genAI =
     geminiApiKey
   );
 
-const model =
-  genAI.getGenerativeModel({
-    model: 'gemini-3.7-flash',
-    generationConfig: {
-      responseMimeType:
-        'application/json',
-    },
-  });
+// ============================================================
+// GEMINI MODEL FALLBACK
+//
+// Primary:
+// 3.6 Flash
+//
+// Fallback:
+// 3.5 Flash
+// 3.5 Flash-Lite
+//
+// This prevents the entire app from breaking when
+// one Gemini model temporarily returns 503/429.
+// ============================================================
+
+const GEMINI_MODELS = [
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+];
+
+async function generateWithFallback(
+  prompt: string
+): Promise<string> {
+  let lastError: any = null;
+
+  for (const modelName of GEMINI_MODELS) {
+    try {
+      console.log(
+        `Trying Gemini model: ${modelName}`
+      );
+
+      const model =
+        genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: {
+            responseMimeType:
+              'application/json',
+          },
+        });
+
+      const result =
+        await model.generateContent(
+          prompt
+        );
+
+      const text =
+        result.response.text();
+
+      if (
+        !text ||
+        !text.trim()
+      ) {
+        throw new Error(
+          `${modelName} returned an empty response`
+        );
+      }
+
+      console.log(
+        `Gemini success: ${modelName}`
+      );
+
+      return text;
+    } catch (error: any) {
+      lastError = error;
+
+      console.error(
+        `Gemini ${modelName} failed:`,
+        error?.message || error
+      );
+    }
+  }
+
+  throw (
+    lastError ||
+    new Error(
+      'All Gemini models failed'
+    )
+  );
+}
 
 // ============================================================
 // TYPES
@@ -86,7 +156,7 @@ type PlanType =
 
 function cleanJson(
   text: string
-) {
+): string {
   return text
     .replace(
       /```json/gi,
@@ -100,12 +170,60 @@ function cleanJson(
 }
 
 // ============================================================
+// PARSE GEMINI JSON
+// ============================================================
+
+function parseGeminiJson(
+  text: string
+): any {
+  const cleaned =
+    cleanJson(text);
+
+  // First try direct JSON
+  try {
+    return JSON.parse(
+      cleaned
+    );
+  } catch {
+    // Continue below
+  }
+
+  // Fallback:
+  // Find first { and last }
+  const start =
+    cleaned.indexOf('{');
+
+  const end =
+    cleaned.lastIndexOf('}');
+
+  if (
+    start === -1 ||
+    end === -1 ||
+    end <= start
+  ) {
+    throw new Error(
+      'No valid JSON object found'
+    );
+  }
+
+  const extracted =
+    cleaned.slice(
+      start,
+      end + 1
+    );
+
+  return JSON.parse(
+    extracted
+  );
+}
+
+// ============================================================
 // VALIDATE GENERATED PLAN
 // ============================================================
 
 function validatePlan(
   plan: any
-) {
+): boolean {
   if (
     !plan ||
     typeof plan !== 'object'
@@ -139,21 +257,76 @@ function validatePlan(
     'Sunday',
   ];
 
+  // ----------------------------------------------------------
+  // Validate workout
+  // ----------------------------------------------------------
+
   for (const day of days) {
+    const workoutDay =
+      plan.workout[day];
+
     if (
-      !plan.workout[day] ||
-      typeof plan.workout[day] !==
+      !workoutDay ||
+      typeof workoutDay !==
         'object'
     ) {
       return false;
     }
 
     if (
-      !plan.diet[day] ||
-      typeof plan.diet[day] !==
+      typeof workoutDay.focus !==
+      'string'
+    ) {
+      return false;
+    }
+
+    if (
+      typeof workoutDay.duration_minutes !==
+      'number'
+    ) {
+      return false;
+    }
+
+    if (
+      !Array.isArray(
+        workoutDay.exercises
+      )
+    ) {
+      return false;
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Validate diet
+  // ----------------------------------------------------------
+
+  for (const day of days) {
+    const dietDay =
+      plan.diet[day];
+
+    if (
+      !dietDay ||
+      typeof dietDay !==
         'object'
     ) {
       return false;
+    }
+
+    // Sunday may be a recovery/simple diet day,
+    // but the AI should still return an object.
+    if (
+      day !== 'Sunday'
+    ) {
+      if (
+        !dietDay.breakfast ||
+        !dietDay.lunch ||
+        !dietDay.dinner ||
+        !Array.isArray(
+          dietDay.snacks
+        )
+      ) {
+        return false;
+      }
     }
   }
 
@@ -220,7 +393,7 @@ async function savePlan(
   }
 
   // ----------------------------------------------------------
-  // 3. Update existing Week 1 plan
+  // 3. Update existing Week 1
   // ----------------------------------------------------------
 
   if (existing) {
@@ -233,7 +406,8 @@ async function savePlan(
         .update({
           plan_data:
             planData,
-          is_active: true,
+          is_active:
+            true,
         })
         .eq(
           'id',
@@ -252,7 +426,7 @@ async function savePlan(
   }
 
   // ----------------------------------------------------------
-  // 4. Create new Week 1 plan
+  // 4. Create Week 1
   // ----------------------------------------------------------
 
   const {
@@ -365,7 +539,7 @@ export async function POST() {
     const prompt = `
 You are an expert fitness and nutrition planning AI.
 
-Your task is to create a personalized FIRST WEEK plan for this user.
+Create a personalized FIRST WEEK plan for this user.
 
 USER PROFILE:
 ${JSON.stringify(
@@ -374,7 +548,7 @@ ${JSON.stringify(
   2
 )}
 
-IMPORTANT RULES:
+RULES:
 
 1. Respect the user's fitness goal.
 2. Respect experience level.
@@ -393,18 +567,20 @@ IMPORTANT RULES:
 15. Do not invent equipment the user does not have.
 16. Workout must contain Monday through Sunday.
 17. Diet must contain Monday through Sunday.
-18. Sunday can be a recovery day if appropriate.
-19. Every workout day must contain exercises.
-20. Every diet day must contain breakfast, lunch, dinner and snacks.
-21. Calories and protein are approximate estimates, not medical prescriptions.
+18. Sunday may be a recovery/rest day.
+19. Every workout day must contain an exercises array.
+20. Every diet day must contain food information.
+21. Calories and protein are approximate estimates.
+22. Do not give medical advice.
+23. Do not use markdown.
+24. Do not use code fences.
+25. Return ONLY JSON.
 
-RETURN ONLY VALID JSON.
+IMPORTANT:
+The user's actual profile values must be followed.
+Do not replace profile information with assumptions.
 
-Do NOT use markdown.
-Do NOT use code fences.
-Do NOT add explanations outside JSON.
-
-Return EXACTLY this structure:
+RETURN EXACTLY THIS STRUCTURE:
 
 {
   "workout": {
@@ -421,37 +597,31 @@ Return EXACTLY this structure:
         }
       ]
     },
-
     "Tuesday": {
       "focus": "string",
       "duration_minutes": 30,
       "exercises": []
     },
-
     "Wednesday": {
       "focus": "string",
       "duration_minutes": 30,
       "exercises": []
     },
-
     "Thursday": {
       "focus": "string",
       "duration_minutes": 30,
       "exercises": []
     },
-
     "Friday": {
       "focus": "string",
       "duration_minutes": 30,
       "exercises": []
     },
-
     "Saturday": {
       "focus": "string",
       "duration_minutes": 30,
       "exercises": []
     },
-
     "Sunday": {
       "focus": "Rest / Recovery",
       "duration_minutes": 0,
@@ -467,21 +637,18 @@ Return EXACTLY this structure:
         "approx_calories": 0,
         "approx_protein_g": 0
       },
-
       "lunch": {
         "meal": "string",
         "items": ["string"],
         "approx_calories": 0,
         "approx_protein_g": 0
       },
-
       "dinner": {
         "meal": "string",
         "items": ["string"],
         "approx_calories": 0,
         "approx_protein_g": 0
       },
-
       "snacks": [
         {
           "meal": "string",
@@ -490,7 +657,6 @@ Return EXACTLY this structure:
           "approx_protein_g": 0
         }
       ],
-
       "daily_total_calories": 0,
       "daily_total_protein_g": 0
     },
@@ -506,18 +672,22 @@ Return EXACTLY this structure:
 `;
 
     // --------------------------------------------------------
-    // 4. CALL GEMINI
+    // 4. GENERATE WITH GEMINI FALLBACK
     // --------------------------------------------------------
 
-    const result =
-      await model.generateContent(
+    const responseText =
+      await generateWithFallback(
         prompt
       );
 
-    const responseText =
-      result.response.text();
+    // --------------------------------------------------------
+    // 5. CHECK RESPONSE
+    // --------------------------------------------------------
 
-    if (!responseText) {
+    if (
+      !responseText ||
+      !responseText.trim()
+    ) {
       return NextResponse.json(
         {
           error:
@@ -530,20 +700,15 @@ Return EXACTLY this structure:
     }
 
     // --------------------------------------------------------
-    // 5. PARSE JSON
+    // 6. PARSE JSON
     // --------------------------------------------------------
-
-    const cleaned =
-      cleanJson(
-        responseText
-      );
 
     let plan: any;
 
     try {
       plan =
-        JSON.parse(
-          cleaned
+        parseGeminiJson(
+          responseText
         );
     } catch (error) {
       console.error(
@@ -568,7 +733,7 @@ Return EXACTLY this structure:
     }
 
     // --------------------------------------------------------
-    // 6. VALIDATE PLAN
+    // 7. VALIDATE PLAN
     // --------------------------------------------------------
 
     if (
@@ -593,7 +758,7 @@ Return EXACTLY this structure:
     }
 
     // --------------------------------------------------------
-    // 7. SAVE WORKOUT
+    // 8. SAVE WORKOUT
     // --------------------------------------------------------
 
     const workoutPlan =
@@ -604,7 +769,7 @@ Return EXACTLY this structure:
       );
 
     // --------------------------------------------------------
-    // 8. SAVE DIET
+    // 9. SAVE DIET
     // --------------------------------------------------------
 
     const dietPlan =
@@ -615,7 +780,7 @@ Return EXACTLY this structure:
       );
 
     // --------------------------------------------------------
-    // 9. RETURN
+    // 10. SUCCESS
     // --------------------------------------------------------
 
     return NextResponse.json(
