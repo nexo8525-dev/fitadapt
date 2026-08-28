@@ -26,7 +26,8 @@ import {
   CheckCircle2,
   Moon,
   ListChecks,
-  Play
+  Play,
+  TrendingUp
 } from 'lucide-react';
 
 import {
@@ -41,13 +42,6 @@ import {
 
 type WorkoutDifficulty = 'Too Easy' | 'Just Right' | 'Too Hard';
 type DietStatus = 'Followed' | 'Swapped' | 'Skipped';
-
-interface Profile {
-  id: string;
-  clerk_user_id: string;
-  initial_weight_kg?: number | null;
-  weight_kg?: number | null;
-}
 
 interface ActivityMap {
   [day: string]: {
@@ -370,7 +364,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 pb-16">
       
-      {/* 🔴 HEADER WITH LOGOUT BUTTON */}
+      {/* HEADER */}
       <header className="border-b border-slate-800 bg-slate-950/90 pt-8 pb-6 px-6 md:px-8">
         <div className="mx-auto max-w-5xl flex items-start md:items-end justify-between gap-4">
           <div>
@@ -414,10 +408,19 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800 mb-8 max-w-sm">
-          <button onClick={() => setViewMode('today')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${viewMode === 'today' ? 'bg-slate-800 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}>Today</button>
-          <button onClick={() => setViewMode('week')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${viewMode === 'week' ? 'bg-slate-800 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}>Full Week</button>
+        {/* View Toggles & History Navigation (Feature 4 Update) */}
+        <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-8">
+          <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800 w-full md:max-w-sm">
+            <button onClick={() => setViewMode('today')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${viewMode === 'today' ? 'bg-slate-800 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}>Today</button>
+            <button onClick={() => setViewMode('week')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${viewMode === 'week' ? 'bg-slate-800 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}>Full Week</button>
+          </div>
+          
+          <button 
+            onClick={() => window.location.href = '/progress'} 
+            className="w-full md:w-auto flex items-center justify-center gap-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors"
+          >
+            <TrendingUp className="w-4 h-4" /> View Progress & History
+          </button>
         </div>
 
         {/* TODAY VIEW */}
@@ -439,15 +442,19 @@ export default function DashboardPage() {
                     <div className="flex justify-between items-start mb-6">
                       <div>
                         <h3 className="text-2xl font-bold text-white">{todayWorkoutData?.focus || 'Training'}</h3>
-                        <p className="text-slate-400 mt-1">{todayWorkoutData?.duration_minutes} mins • {todayWorkoutData?.exercises?.length || 0} exercises</p>
+                        <p className="text-slate-400 mt-1 flex items-center gap-2">
+                          <Clock3 className="w-4 h-4" /> {todayWorkoutData?.duration_minutes} mins
+                          <span className="text-slate-600">•</span>
+                          <ListChecks className="w-4 h-4" /> {todayWorkoutData?.exercises?.length || 0} exercises
+                        </p>
                       </div>
-                      {isTodayWorkoutCompleted && <span className="bg-indigo-500/20 text-indigo-300 px-3 py-1 rounded-full text-xs font-bold"><CheckCircle2 className="w-4 h-4 inline mr-1"/> Completed</span>}
+                      {isTodayWorkoutCompleted && <span className="bg-indigo-500/20 text-indigo-300 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Completed</span>}
                     </div>
 
                     <button
                       disabled={activityLoading === `workout-${currentDayStr}`}
                       onClick={startWorkout}
-                      className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 ${isTodayWorkoutCompleted ? 'bg-slate-800 text-slate-300' : 'bg-indigo-600 text-white shadow-lg'}`}
+                      className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all ${isTodayWorkoutCompleted ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-indigo-600 text-white shadow-lg hover:bg-indigo-500 shadow-indigo-600/20'}`}
                     >
                       {activityLoading === `workout-${currentDayStr}` ? <Loader2 className="animate-spin" /> : (isTodayWorkoutCompleted ? 'Review Activity' : <><Play className="w-5 h-5"/> Start Workout</>)}
                     </button>
@@ -459,7 +466,7 @@ export default function DashboardPage() {
             {/* Diet Card */}
             <section>
               <h2 className="text-xl font-bold text-white mb-4">Today's Diet</h2>
-              <div className={`border rounded-2xl p-6 ${isTodayDietCompleted ? 'bg-emerald-950/20 border-emerald-500/30' : 'bg-slate-900 border-slate-800'}`}>
+              <div className={`border rounded-2xl p-6 transition-all ${isTodayDietCompleted ? 'bg-emerald-950/20 border-emerald-500/30' : 'bg-slate-900 border-slate-800'}`}>
                 <div className="flex justify-between items-start mb-6">
                   <div>
                     <h3 className="text-xl font-bold text-white">Daily Nutrition</h3>
@@ -468,7 +475,7 @@ export default function DashboardPage() {
                       <span className="text-emerald-400 text-sm font-medium"><Zap className="w-4 h-4 inline mr-1"/> {todayDietData?.daily_total_protein_g ?? todayDietData?.total_protein_g ?? 0}g Pro</span>
                     </div>
                   </div>
-                  {isTodayDietCompleted && <span className="bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full text-xs font-bold"><CheckCircle2 className="w-4 h-4 inline mr-1" /> Done</span>}
+                  {isTodayDietCompleted && <span className="bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Done</span>}
                 </div>
 
                 <div className="grid sm:grid-cols-2 gap-4">
@@ -483,7 +490,7 @@ export default function DashboardPage() {
                       {meals.length > 0 ? meals.map((meal, idx) => {
                         const tracking = dietActivity[currentDayStr]?.tracking_data?.[title]?.[idx];
                         return (
-                          <div key={idx} onClick={() => openDietMealTracker(title, meal, idx)} className="mb-3 cursor-pointer hover:bg-slate-800 p-2 -mx-2 rounded-lg border border-transparent hover:border-slate-700 flex justify-between items-center">
+                          <div key={idx} onClick={() => openDietMealTracker(title, meal, idx)} className="mb-3 cursor-pointer hover:bg-slate-800 p-2 -mx-2 rounded-lg border border-transparent hover:border-slate-700 flex justify-between items-center transition-colors">
                             <div>
                               <p className="font-medium text-slate-200">{getMealName(meal)}</p>
                               <p className="text-xs text-slate-400">{getMealCalories(meal)} kcal</p>
@@ -504,13 +511,14 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* WEEKLY VIEW (Omitted extensive details to fit format, renders simplified list) */}
+        {/* WEEKLY VIEW */}
         {viewMode === 'week' && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-white mb-2">Look Ahead</h2>
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center text-slate-400">
-              <CalendarDays className="w-8 h-8 mx-auto mb-3 text-slate-500" />
-              <p>Weekly view is currently active. Switch to "Today" to log your daily tasks.</p>
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-400">
+              <CalendarDays className="w-12 h-12 mx-auto mb-4 text-slate-500 opacity-50" />
+              <p className="text-lg font-medium text-slate-300 mb-2">Weekly Overview</p>
+              <p className="max-w-sm mx-auto">Switch to "Today" to log your daily tasks, or visit Progress & History to see past performance.</p>
             </div>
           </div>
         )}
@@ -520,7 +528,8 @@ export default function DashboardPage() {
           <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-6 text-center">
             <Sparkles className="mx-auto h-8 w-8 text-indigo-400" />
             <h2 className="mt-3 text-xl font-bold text-white">Ready to review this week?</h2>
-            <button onClick={() => { setSubmitError(''); setModalOpen(true); }} className="mt-6 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-7 py-3 font-semibold text-white shadow-lg hover:bg-indigo-700">
+            <p className="mt-2 text-sm text-slate-400">Your feedback helps the AI Coach adjust your next week.</p>
+            <button onClick={() => { setSubmitError(''); setModalOpen(true); }} className="mt-6 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-7 py-3 font-semibold text-white shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 transition-all">
               🏁 Complete Week {currentWeek ?? ''}
             </button>
           </div>
@@ -529,6 +538,7 @@ export default function DashboardPage() {
       </main>
 
       {/* 🔴 MODALS */}
+      
       {/* Workout Tracking Modal */}
       {workoutModalOpen && (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/90 p-4 md:p-10 backdrop-blur-sm">
@@ -560,17 +570,17 @@ export default function DashboardPage() {
               
               <div className="bg-indigo-950/20 rounded-xl p-5 border border-indigo-500/20 mt-6">
                 <h4 className="text-sm font-bold text-indigo-300 uppercase tracking-wider mb-4">Overall Feedback</h4>
-                <select value={activeWorkoutData.feedback?.difficulty} onChange={(e) => setActiveWorkoutData({...activeWorkoutData, feedback: {...activeWorkoutData.feedback, difficulty: e.target.value}})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white mb-4">
+                <select value={activeWorkoutData.feedback?.difficulty} onChange={(e) => setActiveWorkoutData({...activeWorkoutData, feedback: {...activeWorkoutData.feedback, difficulty: e.target.value}})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white mb-4 outline-none focus:border-indigo-500">
                   <option>Easy</option>
                   <option>Just Right</option>
                   <option>Hard</option>
                 </select>
-                <textarea placeholder="Any notes on this workout?" value={activeWorkoutData.feedback?.notes} onChange={(e) => setActiveWorkoutData({...activeWorkoutData, feedback: {...activeWorkoutData.feedback, notes: e.target.value}})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white" rows={2}></textarea>
+                <textarea placeholder="Any notes on this workout?" value={activeWorkoutData.feedback?.notes} onChange={(e) => setActiveWorkoutData({...activeWorkoutData, feedback: {...activeWorkoutData.feedback, notes: e.target.value}})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white outline-none focus:border-indigo-500" rows={2}></textarea>
               </div>
             </div>
 
             <div className="p-5 border-t border-slate-800 bg-slate-950">
-              <button onClick={finishWorkout} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-xl">Save & Complete Workout</button>
+              <button onClick={finishWorkout} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-xl transition-colors">Save & Complete Workout</button>
             </div>
           </div>
         </div>
@@ -579,10 +589,10 @@ export default function DashboardPage() {
       {/* Diet Tracking Modal */}
       {dietModalOpen && activeDietMeal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 p-5">
-              <h2 className="text-lg font-bold text-white">{activeDietMeal.title} Tracking</h2>
-              <button onClick={() => setDietModalOpen(false)} className="text-slate-500"><X /></button>
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-800 p-5 bg-slate-950">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2"><Utensils className="w-5 h-5 text-emerald-400"/> {activeDietMeal.title} Log</h2>
+              <button onClick={() => setDietModalOpen(false)} className="text-slate-500 hover:text-white"><X /></button>
             </div>
             <div className="p-6">
               <div className="mb-6 bg-slate-950 p-4 rounded-xl border border-slate-800">
@@ -590,10 +600,10 @@ export default function DashboardPage() {
                 <p className="text-lg font-semibold text-white mt-1">{getMealName(activeDietMeal.meal)}</p>
               </div>
 
-              <label className="text-sm font-bold text-slate-300 mb-2 block">Did you follow this?</label>
+              <label className="text-sm font-bold text-slate-300 mb-3 block">Did you follow this?</label>
               <div className="grid grid-cols-3 gap-2 mb-6">
                 {['Followed', 'Swapped', 'Skipped'].map((status) => (
-                  <button key={status} onClick={() => setActiveDietForm({...activeDietForm, status: status as DietStatus})} className={`py-2 rounded-lg text-sm font-bold border ${activeDietForm.status === status ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}>
+                  <button key={status} onClick={() => setActiveDietForm({...activeDietForm, status: status as DietStatus})} className={`py-2 rounded-lg text-sm font-bold border transition-colors ${activeDietForm.status === status ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-white'}`}>
                     {status}
                   </button>
                 ))}
@@ -602,12 +612,12 @@ export default function DashboardPage() {
               {activeDietForm.status !== 'Followed' && (
                 <div className="mb-4">
                   <label className="text-sm font-bold text-slate-300 mb-2 block">Reason / What did you eat?</label>
-                  <textarea value={activeDietForm.reason} onChange={(e) => setActiveDietForm({...activeDietForm, reason: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white" rows={3}></textarea>
+                  <textarea value={activeDietForm.reason} onChange={(e) => setActiveDietForm({...activeDietForm, reason: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-emerald-500" rows={3} placeholder={activeDietForm.status === 'Swapped' ? "e.g., Ate outside, had a sandwich instead." : "e.g., Wasn't hungry."}></textarea>
                 </div>
               )}
             </div>
-            <div className="p-5 border-t border-slate-800">
-              <button onClick={saveDietMeal} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl">Save Log</button>
+            <div className="p-5 border-t border-slate-800 bg-slate-950">
+              <button onClick={saveDietMeal} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3.5 rounded-xl transition-colors">Save Diet Log</button>
             </div>
           </div>
         </div>
@@ -616,8 +626,8 @@ export default function DashboardPage() {
       {/* Weekly Feedback Modal */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget && !submittingReview) setModalOpen(false); }}>
-          <div className="my-8 w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 p-6">
+          <div className="my-8 w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-800 p-6 bg-slate-950">
               <div>
                 <h2 className="text-xl font-bold text-white">Weekly Check-In</h2>
                 <p className="mt-1 text-sm text-slate-500">Week {currentWeek} review</p>
@@ -644,10 +654,10 @@ export default function DashboardPage() {
                 <textarea rows={4} value={formData.user_notes} onChange={(e) => setFormData((prev) => ({ ...prev, user_notes: e.target.value }))} className="mt-2 w-full resize-none rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-white outline-none focus:border-indigo-500" />
               </div>
               {submitError && <div className="rounded-lg border border-red-900/50 bg-red-950/30 p-3 text-sm text-red-300">{submitError}</div>}
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-800 mt-2">
                 <button type="button" disabled={submittingReview} onClick={() => setModalOpen(false)} className="rounded-lg border border-slate-700 px-5 py-2.5 text-sm font-semibold text-slate-300 hover:bg-slate-800">Cancel</button>
                 <button type="submit" disabled={submittingReview} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700">
-                  {submittingReview ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Submit
+                  {submittingReview ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Submit Review
                 </button>
               </div>
             </form>
