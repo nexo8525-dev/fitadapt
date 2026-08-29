@@ -128,9 +128,6 @@ export default function DashboardPage() {
   const [viewMode, setViewMode] = useState<'today' | 'week'>('today');
   const [currentDayStr, setCurrentDayStr] = useState<string>('Monday');
 
-  const [expandedWorkoutDay, setExpandedWorkoutDay] = useState<string | null>(null);
-  const [expandedDietDay, setExpandedDietDay] = useState<string | null>(null);
-
   // Modals Data
   const [workoutModalOpen, setWorkoutModalOpen] = useState(false);
   const [activeWorkoutData, setActiveWorkoutData] = useState<any>({});
@@ -150,6 +147,7 @@ export default function DashboardPage() {
   });
 
   useEffect(() => {
+    // Prevent hydration errors by setting day on client side
     const todayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
     setCurrentDayStr(todayName);
   }, []);
@@ -171,6 +169,7 @@ export default function DashboardPage() {
       setWorkoutActivity(buildActivityMap(data.workoutActivity || []));
       setDietActivity(buildActivityMap(data.dietActivity || []));
 
+      // Prefill weight from latest data
       if (data.latestReview?.weight_kg != null) setFormData(prev => ({ ...prev, weight_kg: String(data.latestReview!.weight_kg) }));
       else if (data.profile?.initial_weight_kg != null) setFormData(prev => ({ ...prev, weight_kg: String(data.profile!.initial_weight_kg) }));
       else if (data.profile?.weight_kg != null) setFormData(prev => ({ ...prev, weight_kg: String(data.profile!.weight_kg) }));
@@ -364,7 +363,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 pb-16">
       
-      {/* HEADER */}
+      {/* 🔴 HEADER WITH LOGOUT BUTTON */}
       <header className="border-b border-slate-800 bg-slate-950/90 pt-8 pb-6 px-6 md:px-8">
         <div className="mx-auto max-w-5xl flex items-start md:items-end justify-between gap-4">
           <div>
@@ -408,19 +407,27 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* View Toggles & History Navigation (Feature 4 Update) */}
+        {/* View Toggles & Navigation to New Pages */}
         <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-8">
           <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800 w-full md:max-w-sm">
             <button onClick={() => setViewMode('today')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${viewMode === 'today' ? 'bg-slate-800 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}>Today</button>
             <button onClick={() => setViewMode('week')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${viewMode === 'week' ? 'bg-slate-800 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}>Full Week</button>
           </div>
           
-          <button 
-            onClick={() => window.location.href = '/progress'} 
-            className="w-full md:w-auto flex items-center justify-center gap-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors"
-          >
-            <TrendingUp className="w-4 h-4" /> View Progress & History
-          </button>
+          <div className="flex w-full md:w-auto gap-3">
+            <button 
+              onClick={() => window.location.href = '/plan'} 
+              className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-indigo-600/20"
+            >
+              <ListChecks className="w-4 h-4" /> View Plan
+            </button>
+            <button 
+              onClick={() => window.location.href = '/progress'} 
+              className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors"
+            >
+              <TrendingUp className="w-4 h-4" /> History
+            </button>
+          </div>
         </div>
 
         {/* TODAY VIEW */}
@@ -437,7 +444,7 @@ export default function DashboardPage() {
                   <p className="text-slate-400">Take it easy and recover.</p>
                 </div>
               ) : (
-                <div className={`border rounded-2xl overflow-hidden ${isTodayWorkoutCompleted ? 'bg-indigo-950/20 border-indigo-500/30' : 'bg-slate-900 border-slate-800'}`}>
+                <div className={`border rounded-2xl overflow-hidden transition-all ${isTodayWorkoutCompleted ? 'bg-indigo-950/20 border-indigo-500/30' : 'bg-slate-900 border-slate-800'}`}>
                   <div className="p-6">
                     <div className="flex justify-between items-start mb-6">
                       <div>
@@ -471,8 +478,8 @@ export default function DashboardPage() {
                   <div>
                     <h3 className="text-xl font-bold text-white">Daily Nutrition</h3>
                     <div className="flex gap-4 mt-2">
-                      <span className="text-orange-400 text-sm font-medium"><Flame className="w-4 h-4 inline mr-1"/> {todayDietData?.daily_total_calories ?? todayDietData?.total_calories ?? 0} kcal</span>
-                      <span className="text-emerald-400 text-sm font-medium"><Zap className="w-4 h-4 inline mr-1"/> {todayDietData?.daily_total_protein_g ?? todayDietData?.total_protein_g ?? 0}g Pro</span>
+                      <span className="text-orange-400 text-sm font-medium flex items-center gap-1"><Flame className="w-4 h-4"/> {todayDietData?.daily_total_calories ?? todayDietData?.total_calories ?? 0} kcal</span>
+                      <span className="text-emerald-400 text-sm font-medium flex items-center gap-1"><Zap className="w-4 h-4"/> {todayDietData?.daily_total_protein_g ?? todayDietData?.total_protein_g ?? 0}g Pro</span>
                     </div>
                   </div>
                   {isTodayDietCompleted && <span className="bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Done</span>}
@@ -518,7 +525,7 @@ export default function DashboardPage() {
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-400">
               <CalendarDays className="w-12 h-12 mx-auto mb-4 text-slate-500 opacity-50" />
               <p className="text-lg font-medium text-slate-300 mb-2">Weekly Overview</p>
-              <p className="max-w-sm mx-auto">Switch to "Today" to log your daily tasks, or visit Progress & History to see past performance.</p>
+              <p className="max-w-sm mx-auto">Switch to "Today" to log your daily tasks. Use "View Plan" or "History" to see full details.</p>
             </div>
           </div>
         )}
