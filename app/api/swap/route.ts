@@ -16,6 +16,11 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
 
 const genAI = new GoogleGenerativeAI(geminiApiKey);
 
+// Helper function to clean markdown JSON fences
+function cleanJson(text: string): string {
+  return text.replace(/```json/gi, '').replace(/```/g, '').trim();
+}
+
 export async function POST(req: Request) {
   try {
     const { userId } = await auth();
@@ -28,7 +33,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // 1. Prompt Gemini for an alternative
     const model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash', generationConfig: { responseMimeType: 'application/json' } });
     
     let prompt = `You are an expert AI fitness/nutrition coach. The user wants to swap an item in their current plan.
@@ -40,20 +44,21 @@ User Profile Context: ${JSON.stringify(profileData)}
     if (type === 'workout') {
       prompt += `Original Exercise: "${originalItemName}"
 Provide 1 suitable alternative exercise that targets similar muscles but accommodates the user's reason.
-Return ONLY JSON in this format: { "name": "string", "sets": "string", "reps": "string", "rest_seconds": "string", "notes": "string" }`;
+Return ONLY raw JSON (no markdown) in this format: { "name": "string", "sets": "string", "reps": "string", "rest_seconds": "string", "notes": "string" }`;
     } else {
       prompt += `Original Meal: "${originalItemName}"
 Provide 1 suitable alternative meal that accommodates the user's reason (e.g. food unavailable/disliked) keeping macros similar.
-Return ONLY JSON in this format: { "meal": "string", "calories": number, "protein_g": number, "ingredients": "string" }`;
+Return ONLY raw JSON (no markdown) in this format: { "meal": "string", "calories": number, "protein_g": number, "ingredients": "string" }`;
     }
 
     const result = await model.generateContent(prompt);
-    const replacementData = JSON.parse(result.response.text());
+    
+    // Clean the text before parsing
+    const rawText = result.response.text();
+    const replacementData = JSON.parse(cleanJson(rawText));
 
-    // 2. Save modification to Database
     const table = type === 'workout' ? 'workout_plans' : 'diet_plans';
     
-    // Get existing modifications
     const { data: currentPlan, error: fetchError } = await supabaseAdmin
       .from(table).select('modifications').eq('id', planId).single();
       
@@ -62,7 +67,6 @@ Return ONLY JSON in this format: { "meal": "string", "calories": number, "protei
     const currentMods = currentPlan.modifications || {};
     if (!currentMods[day]) currentMods[day] = {};
     
-    // Save the swap details
     currentMods[day][originalItemName] = {
       ...replacementData,
       swapped_at: new Date().toISOString(),
