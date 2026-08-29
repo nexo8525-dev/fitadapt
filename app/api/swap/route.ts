@@ -16,7 +16,8 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
 
 const genAI = new GoogleGenerativeAI(geminiApiKey);
 
-// Helper function to clean markdown JSON fences
+const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-1.5-flash'];
+
 function cleanJson(text: string): string {
   return text.replace(/```json/gi, '').replace(/```/g, '').trim();
 }
@@ -33,8 +34,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash', generationConfig: { responseMimeType: 'application/json' } });
-    
     let prompt = `You are an expert AI fitness/nutrition coach. The user wants to swap an item in their current plan.
 Reason for swap: "${reason || 'Needs a different option'}"
 User Profile Context: ${JSON.stringify(profileData)}
@@ -44,25 +43,43 @@ User Profile Context: ${JSON.stringify(profileData)}
     if (type === 'workout') {
       prompt += `Original Exercise: "${originalItemName}"
 Provide 1 suitable alternative exercise that targets similar muscles but accommodates the user's reason.
-Return ONLY raw JSON (no markdown) in this format: { "name": "string", "sets": "string", "reps": "string", "rest_seconds": "string", "notes": "string" }`;
+Return ONLY raw JSON (no markdown fences) in this exact format: { "name": "string", "sets": "string", "reps": "string", "rest_seconds": "string", "notes": "string" }`;
     } else {
       prompt += `Original Meal: "${originalItemName}"
-Provide 1 suitable alternative meal that accommodates the user's reason (e.g. food unavailable/disliked) keeping macros similar.
-Return ONLY raw JSON (no markdown) in this format: { "meal": "string", "calories": number, "protein_g": number, "ingredients": "string" }`;
+Provide 1 suitable alternative meal that accommodates the user's reason keeping macros similar.
+Return ONLY raw JSON (no markdown fences) in this exact format: { "meal": "string", "calories": number, "protein_g": number, "ingredients": "string" }`;
     }
 
-    const result = await model.generateContent(prompt);
-    
-    // Clean the text before parsing
-    const rawText = result.response.text();
-    const replacementData = JSON.parse(cleanJson(rawText));
+    let resultText = "";
+    let success = false;
+
+    // Fallback Logic
+    for (const modelName of GEMINI_MODELS) {
+      try {
+        console.log(`Swap API: Trying model ${modelName}`);
+        const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: 'application/json' } });
+        const result = await model.generateContent(prompt);
+        resultText = result.response.text();
+        success = true;
+        break; 
+      } catch (err) {
+        console.error(`Swap API: Model ${modelName} failed`);
+      }
+    }
+
+    if (!success) throw new Error("All Gemini models failed to generate a response.");
+
+    const replacementData = JSON.parse(cleanJson(resultText));
 
     const table = type === 'workout' ? 'workout_plans' : 'diet_plans';
     
     const { data: currentPlan, error: fetchError } = await supabaseAdmin
       .from(table).select('modifications').eq('id', planId).single();
       
-    if (fetchError) throw fetchError;
+    if (fetchError) {
+      console.error("Supabase fetch error:", fetchError);
+      throw fetchError;
+    }
 
     const currentMods = currentPlan.modifications || {};
     if (!currentMods[day]) currentMods[day] = {};
@@ -76,11 +93,14 @@ Return ONLY raw JSON (no markdown) in this format: { "meal": "string", "calories
     const { error: updateError } = await supabaseAdmin
       .from(table).update({ modifications: currentMods }).eq('id', planId);
 
-    if (updateError) throw updateError;
+    if (updateError) {
+      console.error("Supabase update error:", updateError);
+      throw updateError;
+    }
 
     return NextResponse.json({ success: true, replacement: replacementData });
   } catch (error: any) {
-    console.error('Swap API Error:', error);
+    console.error('Swap API Critical Error:', error);
     return NextResponse.json({ error: error?.message || 'Failed to process swap' }, { status: 500 });
   }
 }
