@@ -27,7 +27,8 @@ import {
   Moon,
   ListChecks,
   Play,
-  TrendingUp
+  TrendingUp,
+  Settings
 } from 'lucide-react';
 
 import {
@@ -363,7 +364,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 pb-16">
       
-      {/* 🔴 HEADER WITH LOGOUT BUTTON */}
+      {/* HEADER WITH SETTINGS & LOGOUT */}
       <header className="border-b border-slate-800 bg-slate-950/90 pt-8 pb-6 px-6 md:px-8">
         <div className="mx-auto max-w-5xl flex items-start md:items-end justify-between gap-4">
           <div>
@@ -376,14 +377,24 @@ export default function DashboardPage() {
             </h1>
           </div>
           
-          <button 
-            onClick={handleLogout} 
-            className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 p-2.5 md:px-4 md:py-2.5 text-slate-400 hover:bg-red-950/30 hover:text-red-400 hover:border-red-900/50 transition-all" 
-            title="Logout"
-          >
-            <LogOut className="h-5 w-5" />
-            <span className="hidden md:inline text-sm font-semibold">Logout</span>
-          </button>
+          <div className="flex items-center gap-2 md:gap-3">
+            <button 
+              onClick={() => window.location.href = '/settings'} 
+              className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 p-2.5 md:px-4 md:py-2.5 text-slate-400 hover:bg-slate-800 hover:text-white transition-all" 
+              title="Settings"
+            >
+              <Settings className="h-5 w-5" />
+              <span className="hidden md:inline text-sm font-semibold">Settings</span>
+            </button>
+            <button 
+              onClick={handleLogout} 
+              className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 p-2.5 md:px-4 md:py-2.5 text-slate-400 hover:bg-red-950/30 hover:text-red-400 hover:border-red-900/50 transition-all" 
+              title="Logout"
+            >
+              <LogOut className="h-5 w-5" />
+              <span className="hidden md:inline text-sm font-semibold">Logout</span>
+            </button>
+          </div>
         </div>
       </header>
 
