@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useUser } from '@clerk/nextjs';
-import { Loader2, ArrowLeft, Dumbbell, Utensils, RefreshCw, X, AlertCircle } from 'lucide-react';
+import { Loader2, ArrowLeft, Dumbbell, Utensils, RefreshCw, X, AlertCircle, ShieldAlert } from 'lucide-react';
+
+const WORKOUT_REASONS = ['Too difficult', 'Pain/discomfort', 'No equipment', "Don't know how to perform it", "Don't like it", 'Other'];
+const DIET_REASONS = ['Food unavailable', 'Too expensive', "Don't like it", 'Not practical', 'Dietary preference', 'Other'];
 
 export default function PlanDetailsPage() {
   const { user, isLoaded } = useUser();
@@ -12,8 +15,9 @@ export default function PlanDetailsPage() {
   const [activeTab, setActiveTab] = useState<'workout' | 'diet'>('workout');
   const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-  const [swapModal, setSwapModal] = useState<{isOpen: boolean, type: string, day: string, item: any, itemName: string} | null>(null);
-  const [swapReason, setSwapReason] = useState('');
+  const [swapModal, setSwapModal] = useState<{isOpen: boolean, type: 'workout'|'diet', day: string, item: any, itemName: string} | null>(null);
+  const [swapCategory, setSwapCategory] = useState('');
+  const [swapDetails, setSwapDetails] = useState('');
   const [swapping, setSwapping] = useState(false);
 
   const fetchPlanData = async () => {
@@ -33,7 +37,7 @@ export default function PlanDetailsPage() {
   }, [isLoaded, user]);
 
   const handleSwapRequest = async () => {
-    if (!swapModal) return;
+    if (!swapModal || !swapCategory) return;
     setSwapping(true);
     
     try {
@@ -46,7 +50,8 @@ export default function PlanDetailsPage() {
           planId: planId,
           day: swapModal.day,
           originalItemName: swapModal.itemName,
-          reason: swapReason,
+          reasonCategory: swapCategory,
+          reasonDetails: swapDetails,
           profileData: dashboard.profile
         })
       });
@@ -55,12 +60,19 @@ export default function PlanDetailsPage() {
       
       await fetchPlanData();
       setSwapModal(null);
-      setSwapReason('');
+      setSwapCategory('');
+      setSwapDetails('');
     } catch (err) {
       alert('Failed to generate replacement. Please try again.');
     } finally {
       setSwapping(false);
     }
+  };
+
+  const openSwapModal = (type: 'workout'|'diet', day: string, item: any, itemName: string) => {
+    setSwapCategory('');
+    setSwapDetails('');
+    setSwapModal({ isOpen: true, type, day, item, itemName });
   };
 
   if (!isLoaded || loading) return <div className="min-h-screen bg-slate-950 flex justify-center items-center"><Loader2 className="animate-spin text-indigo-500 w-8 h-8"/></div>;
@@ -72,11 +84,11 @@ export default function PlanDetailsPage() {
     <div className="min-h-screen bg-slate-950 text-slate-100 pb-16">
       <header className="border-b border-slate-800 bg-slate-950/90 pt-8 pb-6 px-6 md:px-8">
         <div className="mx-auto max-w-5xl">
-          <button onClick={() => window.location.href = '/dashboard'} className="flex items-center gap-2 text-slate-400 hover:text-white mb-4">
+          <button onClick={() => window.location.href = '/dashboard'} className="flex items-center gap-2 text-slate-400 hover:text-white mb-4 transition-colors">
             <ArrowLeft className="w-4 h-4" /> Back to Dashboard
           </button>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Plan Details</h1>
-          <p className="text-slate-400 mt-1">Inspect and customize your active plan.</p>
+          <h1 className="text-3xl font-bold tracking-tight text-white">Plan Details & Modifications</h1>
+          <p className="text-slate-400 mt-1">Week {dashboard?.workout?.week_number || 1} • Inspect your plan or swap items safely.</p>
         </div>
       </header>
 
@@ -90,7 +102,7 @@ export default function PlanDetailsPage() {
           </button>
         </div>
 
-        {/* WORKOUT */}
+        {/* WORKOUT TAB */}
         {activeTab === 'workout' && (
           <div className="space-y-6">
             {DAYS.map(day => {
@@ -130,7 +142,7 @@ export default function PlanDetailsPage() {
                                   <span className="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">{ex.reps} Reps</span>
                                 </div>
                               </div>
-                              <button onClick={() => setSwapModal({isOpen: true, type: 'workout', day, item: ex, itemName: originalName})} className="w-full sm:w-auto bg-slate-800 hover:bg-indigo-600 text-indigo-400 hover:text-white px-4 py-2 rounded-lg text-sm font-bold flex justify-center items-center gap-2 transition-colors border border-slate-700">
+                              <button onClick={() => openSwapModal('workout', day, ex, originalName)} className="w-full sm:w-auto bg-slate-800 hover:bg-indigo-600 text-indigo-400 hover:text-white px-4 py-2 rounded-lg text-sm font-bold flex justify-center items-center gap-2 transition-colors border border-slate-700">
                                 <RefreshCw className="w-4 h-4"/> Swap Exercise
                               </button>
                             </div>
@@ -145,7 +157,7 @@ export default function PlanDetailsPage() {
           </div>
         )}
 
-        {/* DIET */}
+        {/* DIET TAB */}
         {activeTab === 'diet' && (
           <div className="space-y-6">
             {DAYS.map(day => {
@@ -190,7 +202,7 @@ export default function PlanDetailsPage() {
                                         <span className="text-emerald-400">{meal.protein_g || meal.protein || 0}g Pro</span>
                                       </div>
                                     </div>
-                                    <button onClick={() => setSwapModal({isOpen: true, type: 'diet', day, item: meal, itemName: originalName})} className="w-full bg-slate-800 hover:bg-emerald-600 text-emerald-400 hover:text-white px-4 py-2 rounded-lg text-sm font-bold flex justify-center items-center gap-2 transition-colors border border-slate-700">
+                                    <button onClick={() => openSwapModal('diet', day, meal, originalName)} className="w-full bg-slate-800 hover:bg-emerald-600 text-emerald-400 hover:text-white px-4 py-2 rounded-lg text-sm font-bold flex justify-center items-center gap-2 transition-colors border border-slate-700">
                                       <RefreshCw className="w-4 h-4"/> Swap Meal
                                     </button>
                                   </div>
@@ -209,7 +221,7 @@ export default function PlanDetailsPage() {
         )}
       </main>
 
-      {/* MODAL */}
+      {/* SWAP MODAL */}
       {swapModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden">
@@ -221,19 +233,58 @@ export default function PlanDetailsPage() {
               <button onClick={() => setSwapModal(null)} disabled={swapping} className="text-slate-500 hover:text-white"><X /></button>
             </div>
             
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-5">
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Original Item</p>
+                <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Prescribed Item</p>
                 <p className="font-semibold text-slate-200">{swapModal.itemName}</p>
               </div>
+
+              {/* Categorized Reasons */}
               <div>
-                <label className="text-sm font-bold text-slate-300 mb-2 flex items-center gap-2">Why change it? <AlertCircle className="w-4 h-4 text-slate-500"/></label>
-                <textarea value={swapReason} onChange={(e) => setSwapReason(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none" rows={3} placeholder={swapModal.type === 'workout' ? "e.g., Hurt my shoulder." : "e.g., No eggs."}></textarea>
+                <label className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2">Why do you need to change this?</label>
+                <div className="flex flex-wrap gap-2">
+                  {(swapModal.type === 'workout' ? WORKOUT_REASONS : DIET_REASONS).map(reason => (
+                    <button 
+                      key={reason}
+                      onClick={() => setSwapCategory(reason)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${swapCategory === reason ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}`}
+                    >
+                      {reason}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Pain/Discomfort Warning Banner */}
+              {swapCategory === 'Pain/discomfort' && (
+                <div className="bg-red-950/30 border border-red-900/50 p-3 rounded-lg flex gap-3 items-start">
+                  <ShieldAlert className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-bold text-red-400">Safety First</p>
+                    <p className="text-xs text-slate-300 mt-1">If you are experiencing sharp or joint pain, skip this movement entirely. Do not push through pain. Seek professional guidance if needed.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Optional Text Details */}
+              <div className="pt-2">
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Additional Notes (Optional)</label>
+                <textarea 
+                  value={swapDetails} 
+                  onChange={(e) => setSwapDetails(e.target.value)} 
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-indigo-500 text-sm" 
+                  rows={2} 
+                  placeholder="Any specific constraints?"
+                ></textarea>
               </div>
             </div>
 
             <div className="p-5 border-t border-slate-800 bg-slate-950">
-              <button onClick={handleSwapRequest} disabled={swapping || !swapReason.trim()} className={`w-full font-bold py-3.5 rounded-xl flex justify-center items-center gap-2 disabled:opacity-50 ${swapModal.type === 'workout' ? 'bg-indigo-600 text-white' : 'bg-emerald-600 text-white'}`}>
+              <button 
+                onClick={handleSwapRequest} 
+                disabled={swapping || !swapCategory} 
+                className={`w-full font-bold py-3.5 rounded-xl flex justify-center items-center gap-2 disabled:opacity-50 transition-colors ${swapCategory ? (swapModal.type === 'workout' ? 'bg-indigo-600 hover:bg-indigo-500 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white') : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+              >
                 {swapping ? <><Loader2 className="w-5 h-5 animate-spin" /> Generating...</> : 'Request Alternative'}
               </button>
             </div>
