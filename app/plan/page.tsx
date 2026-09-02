@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useUser } from '@clerk/nextjs';
-import { Loader2, ArrowLeft, Dumbbell, Utensils, RefreshCw, X, AlertCircle, ShieldAlert } from 'lucide-react';
+import { Loader2, ArrowLeft, Dumbbell, Utensils, RefreshCw, X, AlertCircle, ShieldAlert, Sparkles, ChevronRight } from 'lucide-react';
 
 const WORKOUT_REASONS = ['Too difficult', 'Pain/discomfort', 'No equipment', "Don't know how to perform it", "Don't like it", 'Other'];
 const DIET_REASONS = ['Food unavailable', 'Too expensive', "Don't like it", 'Not practical', 'Dietary preference', 'Other'];
@@ -19,6 +19,11 @@ export default function PlanDetailsPage() {
   const [swapCategory, setSwapCategory] = useState('');
   const [swapDetails, setSwapDetails] = useState('');
   const [swapping, setSwapping] = useState(false);
+
+  // New State for Transparency Feature
+  const [explainModalOpen, setExplainModalOpen] = useState(false);
+  const [explaining, setExplaining] = useState(false);
+  const [explanationData, setExplanationData] = useState<any>(null);
 
   const fetchPlanData = async () => {
     try {
@@ -39,40 +44,45 @@ export default function PlanDetailsPage() {
   const handleSwapRequest = async () => {
     if (!swapModal || !swapCategory) return;
     setSwapping(true);
-    
     try {
       const planId = swapModal.type === 'workout' ? dashboard.workout.id : dashboard.diet.id;
       const res = await fetch('/api/swap', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: swapModal.type,
-          planId: planId,
-          day: swapModal.day,
-          originalItemName: swapModal.itemName,
-          reasonCategory: swapCategory,
-          reasonDetails: swapDetails,
-          profileData: dashboard.profile
+          type: swapModal.type, planId, day: swapModal.day,
+          originalItemName: swapModal.itemName, reasonCategory: swapCategory,
+          reasonDetails: swapDetails, profileData: dashboard.profile
         })
       });
-
       if (!res.ok) throw new Error('Failed to swap');
-      
       await fetchPlanData();
       setSwapModal(null);
       setSwapCategory('');
       setSwapDetails('');
     } catch (err) {
-      alert('Failed to generate replacement. Please try again.');
+      alert('Failed to generate replacement.');
     } finally {
       setSwapping(false);
     }
   };
 
-  const openSwapModal = (type: 'workout'|'diet', day: string, item: any, itemName: string) => {
-    setSwapCategory('');
-    setSwapDetails('');
-    setSwapModal({ isOpen: true, type, day, item, itemName });
+  const fetchExplanation = async () => {
+    if (explanationData) {
+      setExplainModalOpen(true);
+      return;
+    }
+    setExplaining(true);
+    setExplainModalOpen(true);
+    try {
+      const res = await fetch('/api/explain-plan', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) setExplanationData(data.explanation);
+    } catch (err) {
+      console.error('Explanation error:', err);
+    } finally {
+      setExplaining(false);
+    }
   };
 
   if (!isLoaded || loading) return <div className="min-h-screen bg-slate-950 flex justify-center items-center"><Loader2 className="animate-spin text-indigo-500 w-8 h-8"/></div>;
@@ -87,8 +97,21 @@ export default function PlanDetailsPage() {
           <button onClick={() => window.location.href = '/dashboard'} className="flex items-center gap-2 text-slate-400 hover:text-white mb-4 transition-colors">
             <ArrowLeft className="w-4 h-4" /> Back to Dashboard
           </button>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Plan Details & Modifications</h1>
-          <p className="text-slate-400 mt-1">Week {dashboard?.workout?.week_number || 1} • Inspect your plan or swap items safely.</p>
+          
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight text-white">Plan Details & Modifications</h1>
+              <p className="text-slate-400 mt-1">Week {dashboard?.workout?.week_number || 1} • Inspect your plan or swap items safely.</p>
+            </div>
+            
+            {/* FEATURE 10: AI PLAN EXPLANATION BUTTON */}
+            <button 
+              onClick={fetchExplanation}
+              className="flex items-center gap-2 bg-indigo-950/30 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-900/40 px-4 py-2.5 rounded-xl text-sm font-bold transition-all"
+            >
+              <Sparkles className="w-4 h-4" /> Why this plan?
+            </button>
+          </div>
         </div>
       </header>
 
@@ -142,7 +165,7 @@ export default function PlanDetailsPage() {
                                   <span className="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">{ex.reps} Reps</span>
                                 </div>
                               </div>
-                              <button onClick={() => openSwapModal('workout', day, ex, originalName)} className="w-full sm:w-auto bg-slate-800 hover:bg-indigo-600 text-indigo-400 hover:text-white px-4 py-2 rounded-lg text-sm font-bold flex justify-center items-center gap-2 transition-colors border border-slate-700">
+                              <button onClick={() => setSwapModal({isOpen: true, type: 'workout', day, item: ex, itemName: originalName})} className="w-full sm:w-auto bg-slate-800 hover:bg-indigo-600 text-indigo-400 hover:text-white px-4 py-2 rounded-lg text-sm font-bold flex justify-center items-center gap-2 transition-colors border border-slate-700">
                                 <RefreshCw className="w-4 h-4"/> Swap Exercise
                               </button>
                             </div>
@@ -187,7 +210,7 @@ export default function PlanDetailsPage() {
                                     <div className="absolute top-0 right-0 bg-orange-500/20 text-orange-400 text-[10px] font-bold px-2 py-1 rounded-bl-lg uppercase">AI Replaced</div>
                                     <p className="line-through text-slate-600 text-xs mb-2">Original: {originalName}</p>
                                     <p className="font-bold text-white text-lg">{swappedMeal.meal}</p>
-                                    <p className="text-sm text-slate-400 mt-1 mb-3">{swappedMeal.ingredients || 'Adapted ingredients'}</p>
+                                    <p className="text-sm text-slate-400 mt-1 mb-3">{swappedMeal.ingredients}</p>
                                     <div className="flex gap-3 text-sm font-bold">
                                       <span className="text-orange-400">{swappedMeal.calories} kcal</span>
                                       <span className="text-emerald-400">{swappedMeal.protein_g}g Pro</span>
@@ -202,7 +225,7 @@ export default function PlanDetailsPage() {
                                         <span className="text-emerald-400">{meal.protein_g || meal.protein || 0}g Pro</span>
                                       </div>
                                     </div>
-                                    <button onClick={() => openSwapModal('diet', day, meal, originalName)} className="w-full bg-slate-800 hover:bg-emerald-600 text-emerald-400 hover:text-white px-4 py-2 rounded-lg text-sm font-bold flex justify-center items-center gap-2 transition-colors border border-slate-700">
+                                    <button onClick={() => setSwapModal({isOpen: true, type: 'diet', day, item: meal, itemName: originalName})} className="w-full bg-slate-800 hover:bg-emerald-600 text-emerald-400 hover:text-white px-4 py-2 rounded-lg text-sm font-bold flex justify-center items-center gap-2 transition-colors border border-slate-700">
                                       <RefreshCw className="w-4 h-4"/> Swap Meal
                                     </button>
                                   </div>
@@ -221,7 +244,61 @@ export default function PlanDetailsPage() {
         )}
       </main>
 
-      {/* SWAP MODAL */}
+      {/* ====================================================
+          EXPLANATION MODAL (Feature 10)
+      ==================================================== */}
+      {explainModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-indigo-500/30 bg-slate-900 shadow-2xl overflow-hidden max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-800 p-5 bg-indigo-950/20">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-indigo-400"/> AI Plan Insights
+              </h2>
+              <button onClick={() => setExplainModalOpen(false)} className="text-slate-500 hover:text-white"><X /></button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto">
+              {explaining ? (
+                <div className="flex flex-col items-center justify-center py-12 text-indigo-400">
+                  <Loader2 className="w-8 h-8 animate-spin mb-4" />
+                  <p className="font-semibold">Analyzing plan decisions...</p>
+                  <p className="text-xs text-slate-500 mt-2">Correlating profile and historical logs.</p>
+                </div>
+              ) : explanationData ? (
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-2"><Dumbbell className="w-4 h-4 text-indigo-400"/> Workout Rationale</h3>
+                    <p className="text-slate-300 text-sm leading-relaxed bg-slate-950 p-4 rounded-xl border border-slate-800">{explanationData.workout_explanation}</p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-2"><Utensils className="w-4 h-4 text-emerald-400"/> Diet Rationale</h3>
+                    <p className="text-slate-300 text-sm leading-relaxed bg-slate-950 p-4 rounded-xl border border-slate-800">{explanationData.diet_explanation}</p>
+                  </div>
+                  
+                  {explanationData.changes && explanationData.changes.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-3 mt-2">Week-over-Week Changes</h3>
+                      <div className="space-y-3">
+                        {explanationData.changes.map((change: any, i: number) => (
+                          <div key={i} className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                            <p className="font-bold text-slate-200">{change.item}</p>
+                            <p className="text-sm text-indigo-300 mt-1 flex items-center gap-1"><ChevronRight className="w-3 h-3"/> {change.change}</p>
+                            <p className="text-xs text-slate-400 mt-2 italic bg-slate-900 p-2 rounded border border-slate-800">{change.reason}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-red-400 text-center py-6">Failed to load insights.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SWAP MODAL (From Feature 9) */}
       {swapModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden">
@@ -239,23 +316,17 @@ export default function PlanDetailsPage() {
                 <p className="font-semibold text-slate-200">{swapModal.itemName}</p>
               </div>
 
-              {/* Categorized Reasons */}
               <div>
                 <label className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2">Why do you need to change this?</label>
                 <div className="flex flex-wrap gap-2">
                   {(swapModal.type === 'workout' ? WORKOUT_REASONS : DIET_REASONS).map(reason => (
-                    <button 
-                      key={reason}
-                      onClick={() => setSwapCategory(reason)}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${swapCategory === reason ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}`}
-                    >
+                    <button key={reason} onClick={() => setSwapCategory(reason)} className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${swapCategory === reason ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}`}>
                       {reason}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Pain/Discomfort Warning Banner */}
               {swapCategory === 'Pain/discomfort' && (
                 <div className="bg-red-950/30 border border-red-900/50 p-3 rounded-lg flex gap-3 items-start">
                   <ShieldAlert className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
@@ -266,25 +337,14 @@ export default function PlanDetailsPage() {
                 </div>
               )}
 
-              {/* Optional Text Details */}
               <div className="pt-2">
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Additional Notes (Optional)</label>
-                <textarea 
-                  value={swapDetails} 
-                  onChange={(e) => setSwapDetails(e.target.value)} 
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-indigo-500 text-sm" 
-                  rows={2} 
-                  placeholder="Any specific constraints?"
-                ></textarea>
+                <textarea value={swapDetails} onChange={(e) => setSwapDetails(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-indigo-500 text-sm" rows={2} placeholder="Any specific constraints?"></textarea>
               </div>
             </div>
 
             <div className="p-5 border-t border-slate-800 bg-slate-950">
-              <button 
-                onClick={handleSwapRequest} 
-                disabled={swapping || !swapCategory} 
-                className={`w-full font-bold py-3.5 rounded-xl flex justify-center items-center gap-2 disabled:opacity-50 transition-colors ${swapCategory ? (swapModal.type === 'workout' ? 'bg-indigo-600 hover:bg-indigo-500 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white') : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
-              >
+              <button onClick={handleSwapRequest} disabled={swapping || !swapCategory} className={`w-full font-bold py-3.5 rounded-xl flex justify-center items-center gap-2 disabled:opacity-50 transition-colors ${swapCategory ? (swapModal.type === 'workout' ? 'bg-indigo-600 hover:bg-indigo-500 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white') : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>
                 {swapping ? <><Loader2 className="w-5 h-5 animate-spin" /> Generating...</> : 'Request Alternative'}
               </button>
             </div>
