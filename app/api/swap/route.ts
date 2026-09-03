@@ -15,7 +15,7 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
 });
 
 const genAI = new GoogleGenerativeAI(geminiApiKey);
-const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-1.5-flash'];
+const GEMINI_MODELS = ['gemini-1.5-flash', 'gemini-3.5-flash', 'gemini-3.6-flash'];
 
 function cleanJson(text: string): string {
   return text.replace(/```json/gi, '').replace(/```/g, '').trim();
@@ -27,7 +27,8 @@ export async function POST(req: Request) {
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json();
-    const { type, planId, day, originalItemName, reasonCategory, reasonDetails, profileData } = body;
+    // NEW: We now accept kbContext from the frontend
+    const { type, planId, day, originalItemName, reasonCategory, reasonDetails, profileData, kbContext } = body;
 
     if (!type || !planId || !day || !originalItemName || !reasonCategory) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -48,19 +49,20 @@ CRITICAL SAFETY RULES:
     if (type === 'workout') {
       prompt += `
 Original Exercise: "${originalItemName}"
-Provide 1 suitable alternative exercise that targets similar muscles but strictly accommodates the user's reason.
-Return ONLY raw JSON (no markdown fences) in this exact format: { "name": "string", "sets": "string", "reps": "string", "rest_seconds": "string", "notes": "string" }`;
+${kbContext ? `Suggested safe regressions/progressions from our database: ${JSON.stringify(kbContext)}` : ''}
+Provide 1 suitable alternative exercise that strictly accommodates the user's reason. Prefer the suggested regressions if the user says it's too hard/painful.
+Return ONLY raw JSON (no markdown fences) in this format: { "name": "string", "sets": "string", "reps": "string", "rest_seconds": "string", "notes": "string" }`;
     } else {
       prompt += `
 Original Meal: "${originalItemName}"
+${kbContext ? `Suggested safe substitutions from our database: ${JSON.stringify(kbContext)}` : ''}
 Provide 1 suitable alternative meal that accommodates the user's reason keeping macros similar.
-Return ONLY raw JSON (no markdown fences) in this exact format: { "meal": "string", "calories": number, "protein_g": number, "ingredients": "string" }`;
+Return ONLY raw JSON (no markdown fences) in this format: { "meal": "string", "calories": number, "protein_g": number, "ingredients": "string" }`;
     }
 
     let resultText = "";
     let success = false;
 
-    // Fallback Logic
     for (const modelName of GEMINI_MODELS) {
       try {
         const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: 'application/json' } });
