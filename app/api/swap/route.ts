@@ -17,8 +17,19 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
 const genAI = new GoogleGenerativeAI(geminiApiKey);
 const GEMINI_MODELS = ['gemini-1.5-flash', 'gemini-3.5-flash', 'gemini-3.6-flash'];
 
-function cleanJson(text: string): string {
-  return text.replace(/```json/gi, '').replace(/```/g, '').trim();
+function extractJSON(text: string): any {
+  try {
+    let cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start !== -1 && end !== -1) {
+      cleaned = cleaned.substring(start, end + 1);
+    }
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.error("JSON Parse Error. Raw AI Output:", text);
+    throw new Error("AI did not return valid JSON");
+  }
 }
 
 export async function POST(req: Request) {
@@ -27,81 +38,67 @@ export async function POST(req: Request) {
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json();
-    // NEW: We now accept kbContext from the frontend
     const { type, planId, day, originalItemName, reasonCategory, reasonDetails, profileData, kbContext } = body;
 
     if (!type || !planId || !day || !originalItemName || !reasonCategory) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const combinedReason = `${reasonCategory}${reasonDetails ? ` - Details: ${reasonDetails}` : ''}`;
+    // 1. STRICT AUTHORIZATION CHECK (Feature 13)
+    const { data: profile } = await supabaseAdmin.from('profiles').select('id').eq('clerk_user_id', userId).single();
+    if (!profile) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
 
+    const table = type === 'workout' ? 'workout_plans' : 'diet_plans';
+    const { data: currentPlan, error: fetchError } = await supabaseAdmin
+      .from(table).select('user_id, modifications').eq('id', planId).single();
+      
+    if (fetchError || !currentPlan) throw new Error("Plan not found");
+    if (currentPlan.user_id !== profile.id) return NextResponse.json({ error: 'Forbidden. You do not own this plan.' }, { status: 403 });
+
+    // 2. AI GENERATION
+    const combinedReason = `${reasonCategory}${reasonDetails ? ` - Details: ${reasonDetails}` : ''}`;
     let prompt = `You are an expert AI fitness/nutrition coach. The user requested an item swap in their current plan.
 Reason Category: "${reasonCategory}"
 Additional Details: "${reasonDetails || 'None'}"
 User Profile Context: ${JSON.stringify(profileData)}
 
 CRITICAL SAFETY RULES:
-- If the reason is "Pain/discomfort", DO NOT attempt medical diagnosis. Provide a very gentle regression, a mobility alternative, or explicitly state in the "notes" that they should skip the movement entirely and seek professional guidance.
-- Ensure replacements respect existing equipment and location constraints.
+- If "Pain/discomfort", DO NOT attempt medical diagnosis. Provide a gentle regression or state to skip.
+- Respect existing constraints.
 `;
 
     if (type === 'workout') {
-      prompt += `
-Original Exercise: "${originalItemName}"
-${kbContext ? `Suggested safe regressions/progressions from our database: ${JSON.stringify(kbContext)}` : ''}
-Provide 1 suitable alternative exercise that strictly accommodates the user's reason. Prefer the suggested regressions if the user says it's too hard/painful.
-Return ONLY raw JSON (no markdown fences) in this format: { "name": "string", "sets": "string", "reps": "string", "rest_seconds": "string", "notes": "string" }`;
+      prompt += `Original: "${originalItemName}"\n${kbContext ? `Safe KB Options: ${JSON.stringify(kbContext)}` : ''}\nProvide 1 alternative in raw JSON format: { "name": "string", "sets": "string", "reps": "string", "rest_seconds": "string", "notes": "string" }`;
     } else {
-      prompt += `
-Original Meal: "${originalItemName}"
-${kbContext ? `Suggested safe substitutions from our database: ${JSON.stringify(kbContext)}` : ''}
-Provide 1 suitable alternative meal that accommodates the user's reason keeping macros similar.
-Return ONLY raw JSON (no markdown fences) in this format: { "meal": "string", "calories": number, "protein_g": number, "ingredients": "string" }`;
+      prompt += `Original: "${originalItemName}"\n${kbContext ? `Safe KB Options: ${JSON.stringify(kbContext)}` : ''}\nProvide 1 alternative in raw JSON format: { "meal": "string", "calories": number, "protein_g": number, "ingredients": "string" }`;
     }
 
     let resultText = "";
     let success = false;
-
     for (const modelName of GEMINI_MODELS) {
       try {
         const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: 'application/json' } });
         const result = await model.generateContent(prompt);
         resultText = result.response.text();
-        success = true;
-        break; 
-      } catch (err) {
-        console.error(`Swap API: Model ${modelName} failed`);
-      }
+        success = true; break; 
+      } catch (err) { console.error(`Swap API: Model ${modelName} failed`); }
     }
 
-    if (!success) throw new Error("All Gemini models failed to generate a response.");
+    if (!success) throw new Error("AI failed to generate a response. Please try again.");
+    const replacementData = extractJSON(resultText);
 
-    const replacementData = JSON.parse(cleanJson(resultText));
-    const table = type === 'workout' ? 'workout_plans' : 'diet_plans';
-    
-    const { data: currentPlan, error: fetchError } = await supabaseAdmin
-      .from(table).select('modifications').eq('id', planId).single();
-      
-    if (fetchError) throw fetchError;
-
+    // 3. DATABASE UPDATE
     const currentMods = currentPlan.modifications || {};
     if (!currentMods[day]) currentMods[day] = {};
     
-    currentMods[day][originalItemName] = {
-      ...replacementData,
-      swapped_at: new Date().toISOString(),
-      reason: combinedReason
-    };
+    currentMods[day][originalItemName] = { ...replacementData, swapped_at: new Date().toISOString(), reason: combinedReason };
 
-    const { error: updateError } = await supabaseAdmin
-      .from(table).update({ modifications: currentMods }).eq('id', planId);
-
+    const { error: updateError } = await supabaseAdmin.from(table).update({ modifications: currentMods }).eq('id', planId);
     if (updateError) throw updateError;
 
     return NextResponse.json({ success: true, replacement: replacementData });
   } catch (error: any) {
-    console.error('Swap API Critical Error:', error);
-    return NextResponse.json({ error: error?.message || 'Failed to process swap' }, { status: 500 });
+    console.error('Swap API Error:', error);
+    return NextResponse.json({ error: 'Failed to process swap. Please try again.' }, { status: 500 });
   }
 }
