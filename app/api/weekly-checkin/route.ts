@@ -42,6 +42,35 @@ function isRetryableGeminiError(error: any) {
   return (message.includes('503') || message.includes('429') || message.includes('quota') || message.includes('exhausted'));
 }
 
+// FEATURE 12: EXTRACT PRACTICAL DIET FRICTIONS
+function extractDietFrictions(dietLogs: any[]) {
+  const problemMeals: Record<string, { count: number, reasons: string[] }> = {};
+  
+  dietLogs.forEach(dayLog => {
+    if (!dayLog.meals) return;
+    dayLog.meals.forEach((meal: any) => {
+      if (meal.status === 'Swapped' || meal.status === 'Skipped') {
+        const mealName = meal.prescribed_meal || 'Unknown Meal';
+        if (!problemMeals[mealName]) problemMeals[mealName] = { count: 0, reasons: [] };
+        problemMeals[mealName].count += 1;
+        if (meal.reason && meal.reason.trim() !== '') {
+          problemMeals[mealName].reasons.push(meal.reason.trim().toLowerCase());
+        }
+      }
+    });
+  });
+  
+  // Return an array of meals that failed, sorted by failure frequency
+  return Object.entries(problemMeals)
+    .filter(([_, data]) => data.count > 0)
+    .map(([name, data]) => ({ 
+      meal: name, 
+      failed_attempts: data.count, 
+      reported_reasons: [...new Set(data.reasons)] // Unique reasons
+    }))
+    .sort((a, b) => b.failed_attempts - a.failed_attempts);
+}
+
 // ============================================================
 // FETCH RICH WEEKLY ACTIVITY DATA
 // ============================================================
@@ -62,12 +91,11 @@ async function fetchWeeklyActivities(userId: string, weekNumber: number) {
   if (wError) throw new Error(`Workout activity error: ${wError.message}`);
   if (dError) throw new Error(`Diet activity error: ${dError.message}`);
 
-  // Format data clearly for the AI to understand Prescribed vs Actual
   const formattedWorkouts = (workouts || []).map(w => ({
     day: w.day,
     completed: w.completed,
-    execution: w.tracking_data?.exercises || [], // Contains prescribed vs actual sets/reps
-    feedback: w.tracking_data?.feedback || {}    // Contains per-workout difficulty & notes
+    execution: w.tracking_data?.exercises || [],
+    feedback: w.tracking_data?.feedback || {}
   }));
 
   const formattedDiets = (diets || []).map(d => {
@@ -82,11 +110,14 @@ async function fetchWeeklyActivities(userId: string, weekNumber: number) {
     return { day: d.day, completed: d.completed, meals: mealLogs };
   });
 
+  const dietFrictions = extractDietFrictions(formattedDiets);
+
   return {
     workouts_completed: workouts?.filter(w => w.completed).length || 0,
     diet_completed: diets?.filter(d => d.completed).length || 0,
     workout_logs: formattedWorkouts,
-    diet_logs: formattedDiets
+    diet_logs: formattedDiets,
+    diet_frictions: dietFrictions
   };
 }
 
@@ -100,7 +131,6 @@ async function generateWithGemini(prompt: string) {
   for (const modelName of GEMINI_MODELS) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        console.log(`Gemini request: ${modelName}, attempt ${attempt}`);
         const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: 'application/json' } });
         const result = await model.generateContent(prompt);
         const text = result.response.text();
@@ -148,11 +178,8 @@ export async function POST(req: Request) {
     if (!workoutPlan || !dietPlan) return NextResponse.json({ error: 'Active plans not found' }, { status: 404 });
 
     const currentWeek = workoutPlan.week_number;
-    
-    // Fetch granular tracking data
     const activityData = await fetchWeeklyActivities(profile.id, currentWeek);
 
-    // Build the super-prompt
     const prompt = buildGeminiPrompt({
       profile,
       workoutPlan,
@@ -165,12 +192,10 @@ export async function POST(req: Request) {
     const geminiResult = await generateWithGemini(prompt);
     let aiOutput = parseGeminiJSON(geminiResult.text);
 
-    // Ensure ai_analysis contains the rich text from the adaptation report
     const finalAnalysisText = aiOutput.adaptation_report 
       ? `${aiOutput.adaptation_report.summary} Key Changes: ${[...aiOutput.adaptation_report.workout_changes, ...aiOutput.adaptation_report.diet_changes].join(' ')}`
-      : aiOutput.ai_analysis || "Plan successfully adapted for the new week.";
+      : aiOutput.ai_analysis || "Plan adapted securely for the new week.";
 
-    // Save using the existing untouched RPC function
     const { data: transactionResult, error: transactionError } = await supabase.rpc('generate_new_week_plans', {
       p_user_id: profile.id,
       p_week_number: currentWeek,
@@ -195,74 +220,72 @@ export async function POST(req: Request) {
 }
 
 // ============================================================
-// THE INTELLIGENCE LAYER PROMPT
+// THE INTELLIGENCE LAYER PROMPT (UPGRADED FOR FEATURE 12)
 // ============================================================
 
 function buildGeminiPrompt({ profile, workoutPlan, dietPlan, currentWeek, activityData, feedback }: any) {
   return `
 You are an expert AI fitness and nutrition adaptation engine.
-Your job is to generate the user's next 7-day personalized plan (Week ${currentWeek + 1}) based strictly on ACTUAL USER DATA, not just generic formulas.
+Your job is to generate the user's next 7-day personalized plan (Week ${currentWeek + 1}).
 
-CRITICAL PRINCIPLE: Distinguish PRESCRIBED vs ACTUAL vs FEEDBACK.
-Do NOT randomly change exercises to make the plan "feel new". Every change must be justified by data.
+CRITICAL PRINCIPLE: Distinguish PRESCRIBED vs ACTUAL vs FEEDBACK. Every change must be justified by data.
 
 ====================
 1. USER PROFILE (Constraints)
 ====================
-${JSON.stringify(profile, null, 2)}
+Equipment: ${profile.equipment || 'Bodyweight only'}
+Goal: ${profile.fitness_goal || 'General Fitness'}
+Diet Preference: ${profile.dietary_preference || 'None'}
+Available Foods: ${profile.available_foods || 'Standard groceries'}
+Disliked Foods: ${profile.disliked_foods || 'None'}
+Monthly Budget: ${profile.diet_budget_per_month ? `₹${profile.diet_budget_per_month}` : 'Not specified'}
 
 ====================
 2. PREVIOUS PRESCRIBED PLAN (Week ${currentWeek})
 ====================
-Workout: ${JSON.stringify(workoutPlan.plan_data, null, 2)}
-Diet: ${JSON.stringify(dietPlan.plan_data, null, 2)}
+Workout: ${JSON.stringify(workoutPlan.plan_data)}
+Diet: ${JSON.stringify(dietPlan.plan_data)}
 
 ====================
-3. ANY AI REPLACEMENTS MADE LAST WEEK
-====================
-Workout Swaps: ${JSON.stringify(workoutPlan.modifications || {}, null, 2)}
-Diet Swaps: ${JSON.stringify(dietPlan.modifications || {}, null, 2)}
-
-====================
-4. ACTUAL WORKOUT EXECUTION & FEEDBACK
+3. ACTUAL WORKOUT EXECUTION
 ====================
 Completed: ${activityData.workouts_completed}
-Detailed Logs (Actual Sets/Reps & Difficulty):
-${JSON.stringify(activityData.workout_logs, null, 2)}
+Detailed Logs: ${JSON.stringify(activityData.workout_logs)}
 
 ====================
-5. ACTUAL DIET ADHERENCE
+4. PRACTICAL DIET INTELLIGENCE (FEATURE 12)
 ====================
-Completed: ${activityData.diet_completed}
-Detailed Logs (Followed/Swapped/Skipped & Reasons):
-${JSON.stringify(activityData.diet_logs, null, 2)}
+The user actively tracked their diet. Here are the meals they struggled with (Swapped or Skipped):
+${JSON.stringify(activityData.diet_frictions, null, 2)}
+
+DIET ADAPTATION RULES:
+- FOOD AVAILABILITY: Construct the diet primarily using the user's "Available Foods". Do not assume they own unlisted niche ingredients.
+- BUDGET: Do NOT invent precise market prices. If meals failed due to "expensive" or "budget", or if the user's budget is restricted, rely heavily on universally cheap, practical staples (e.g., lentils, beans, eggs, rice, seasonal vegetables).
+- LEARN FROM FRICTION: Look at the "Diet Frictions" array above. If a meal failed multiple times, DO NOT prescribe it again.
+- TASTE: If a meal failed because it was "disliked", treat those ingredients as banned.
+- SIMPLICITY: Ensure preparation is practical for everyday eating.
 
 ====================
-6. OVERALL WEEKLY CHECK-IN FEEDBACK
+5. OVERALL WEEKLY CHECK-IN FEEDBACK
 ====================
 Current Weight: ${feedback.weight_kg} kg
 General Workout Difficulty: ${feedback.workout_difficulty}
 Energy Rating: ${feedback.energy_rating}/5
 User Notes: ${feedback.user_notes || 'None'}
 
-====================
-ADAPTATION RULES
-====================
-1. WORKOUT REGRESSION: If an exercise log shows "Actual Reps" consistently lower than "Prescribed Reps", OR feedback notes it was too hard, reduce volume, regress the exercise, or increase rest. DO NOT increase difficulty.
-2. WORKOUT PROGRESSION: If an exercise was completed fully and feedback is "Easy", consider slight progressive overload (more reps, harder variation).
-3. SKIPPED WORKOUTS: If workouts were repeatedly skipped or completion rate is low, REDUCE overall weekly volume or simplify the schedule.
-4. DIET SWAPS: If a meal was repeatedly "Swapped" due to missing ingredients, DO NOT prescribe that meal again. Use the user's preferred swaps.
-5. DIET SKIPS: If meals were "Skipped" due to budget or time, prescribe simpler, cheaper meals.
-6. SAFETY: Respect the profile constraints (equipment, budget, available time).
+WORKOUT ADAPTATION RULES:
+1. REGRESSION: If "Actual Reps" < "Prescribed Reps", OR feedback notes it was too hard, reduce volume or regress the exercise.
+2. PROGRESSION: If an exercise was completed fully and feedback is "Easy", consider slight progressive overload.
+3. SKIPS: If workouts were skipped, consider reducing volume.
 
 RETURN ONLY RAW JSON matching this exact structure:
 {
   "adaptation_report": {
     "summary": "2-sentence summary of actual performance vs prescribed.",
-    "key_problems": ["List of identified struggles/skips"],
+    "key_problems": ["List of identified struggles"],
     "what_worked": ["List of successful adherences"],
-    "workout_changes": ["Specifically what changed in the workout and WHY (based on logs)"],
-    "diet_changes": ["Specifically what changed in the diet and WHY (based on logs)"]
+    "workout_changes": ["Specifically what changed in the workout and WHY"],
+    "diet_changes": ["Specifically what changed in the diet based on the Diet Frictions data and budget."]
   },
   "workout": { 
     "Monday": { "focus": "string", "duration_minutes": 30, "exercises": [ { "name": "...", "sets": "...", "reps": "...", "rest_seconds": "...", "notes": "..." } ] },
